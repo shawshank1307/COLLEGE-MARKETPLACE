@@ -1,12 +1,14 @@
 import {
   CATEGORIES,
-  CAMPUSES,
   CONDITIONS,
   getCategoryLabel,
   getCategoryEmoji,
   formatPrice,
   timeAgo,
 } from "./data.js";
+import { JKLU, CAMPUS_PHOTOS, LOGO, photoUrl } from "./config.js";
+import { processListingImage, listingImageHtml } from "./image-utils.js";
+import { initAmbient } from "./ambient.js";
 import { api } from "./api.js";
 import {
   getUser,
@@ -28,13 +30,14 @@ const headerActions = document.getElementById("header-actions");
 let state = {
   search: "",
   category: "all",
-  campus: "All Campuses",
   sort: "newest",
 };
 
 let listingsCache = [];
-let signupDraft = {};
+let myListingsCache = [];
+let signupDraft = { campus: JKLU.campus };
 let cameraStream = null;
+let slideshowTimer = null;
 
 function showToast(message, duration = 3000) {
   toastEl.textContent = message;
@@ -112,10 +115,22 @@ async function fetchListings() {
   return listingsCache;
 }
 
+async function fetchMyListings() {
+  try {
+    const data = await api.getMyListings();
+    myListingsCache = data.listings || [];
+  } catch {
+    myListingsCache = [];
+  }
+  return myListingsCache;
+}
+
 function filterListings(listings) {
   let result = [...listings];
-  if (state.category !== "all") result = result.filter((l) => l.category === state.category);
-  if (state.campus !== "All Campuses") result = result.filter((l) => l.campus === state.campus);
+  if (state.category !== "all") {
+    result = result.filter((l) => l.category === state.category);
+  }
+
   if (state.search.trim()) {
     const q = state.search.toLowerCase();
     result = result.filter(
@@ -138,19 +153,26 @@ function filterListings(listings) {
   return result;
 }
 
-function renderListingCard(listing, { showActions = false } = {}) {
+function renderListingCard(listing, { showActions = false, idx = 0 } = {}) {
   const imageContent = listing.image
-    ? `<img src="${listing.image}" alt="${escapeHtml(listing.title)}" />`
-    : listing.emoji || getCategoryEmoji(listing.category);
+    ? listingImageHtml(listing.image, escapeHtml(listing.title), "")
+    : `<div class="product-photo product-photo-emoji">${listing.emoji || getCategoryEmoji(listing.category)}</div>`;
 
   const soldBadge = listing.status === "sold" ? `<span class="listing-badge sold">Sold</span>` : `<span class="listing-badge">${escapeHtml(listing.condition)}</span>`;
 
   const actions = showActions
-    ? `<div class="listing-actions"><button class="btn btn-outline btn-sm" data-action="delete" data-id="${listing.id}">Delete</button></div>`
+    ? listing.status === "sold"
+      ? `<div class="listing-actions">
+          <button class="btn btn-danger btn-sm" data-action="remove" data-id="${listing.id}">Remove Listing</button>
+         </div>`
+      : `<div class="listing-actions">
+          <button class="btn btn-outline btn-sm" data-action="mark-sold" data-id="${listing.id}">Mark Sold</button>
+          <button class="btn btn-outline btn-sm" data-action="delete" data-id="${listing.id}">Delete</button>
+         </div>`
     : "";
 
   return `
-    <div class="listing-card-wrap">
+    <div class="listing-card-wrap animate-in" style="animation-delay: ${Math.min(idx * 0.06, 0.5)}s">
       <a href="#/item/${listing.id}" class="listing-card ${listing.status === "sold" ? "sold" : ""}">
         <div class="listing-image">${imageContent}${soldBadge}</div>
         <div class="listing-body">
@@ -159,7 +181,7 @@ function renderListingCard(listing, { showActions = false } = {}) {
           <div class="listing-meta">
             <span>${escapeHtml(getCategoryLabel(listing.category))}</span>
             <span class="dot"></span>
-            <span>${escapeHtml(listing.campus)}</span>
+            <span class="jklu-tag">JKLU</span>
             <span class="dot"></span>
             <span>${timeAgo(listing.createdAt)}</span>
           </div>
@@ -167,6 +189,79 @@ function renderListingCard(listing, { showActions = false } = {}) {
       </a>
       ${actions}
     </div>`;
+}
+
+function stopSlideshow() {
+  if (slideshowTimer) {
+    clearInterval(slideshowTimer);
+    slideshowTimer = null;
+  }
+}
+
+function initSlideshow() {
+  stopSlideshow();
+  const slides = document.querySelectorAll(".auth-slide");
+  const dots = document.querySelectorAll(".slide-dot");
+  if (!slides.length) return;
+
+  let current = 0;
+  const show = (index) => {
+    slides.forEach((s, i) => s.classList.toggle("active", i === index));
+    dots.forEach((d, i) => d.classList.toggle("active", i === index));
+    current = index;
+  };
+
+  dots.forEach((dot, i) => {
+    dot.addEventListener("click", () => show(i));
+  });
+
+  slideshowTimer = setInterval(() => {
+    show((current + 1) % slides.length);
+  }, 4500);
+}
+
+function renderAuthShell(formHtml, { subtitle = JKLU.tagline } = {}) {
+  const slides = CAMPUS_PHOTOS.map(
+    (photo, i) =>
+      `<div class="auth-slide ${i === 0 ? "active" : ""}" style="background-image:url('${photoUrl(photo)}')">
+        <div class="auth-slide-overlay"></div>
+        <img src="${LOGO.large}" alt="" class="slide-watermark slide-watermark-tl" aria-hidden="true" />
+        <img src="${LOGO.large}" alt="" class="slide-watermark slide-watermark-br" aria-hidden="true" />
+        <p class="auth-slide-caption animate-caption">${escapeHtml(photo.caption)}</p>
+      </div>`
+  ).join("");
+
+  const dots = CAMPUS_PHOTOS.map(
+    (_, i) => `<button type="button" class="slide-dot ${i === 0 ? "active" : ""}" aria-label="Slide ${i + 1}"></button>`
+  ).join("");
+
+  return `
+    <div class="auth-shell animate-fade">
+      <aside class="auth-visual">
+        <div class="auth-slideshow">${slides}</div>
+        <div class="auth-visual-brand">
+          <img src="${LOGO.large}" alt="JK Lakshmipat University" class="jklu-logo auth-brand-logo" />
+          <p class="auth-visual-location">${escapeHtml(JKLU.location)}</p>
+        </div>
+        <div class="slide-dots">${dots}</div>
+      </aside>
+      <div class="auth-form-panel">
+        <div class="auth-form-inner animate-slide-up">
+          <div class="auth-form-header">
+            <span class="logo-on-white auth-logo-wrap">
+              <img src="${LOGO.header}" alt="JKLU" class="jklu-logo auth-form-logo" />
+            </span>
+            <span class="auth-brand">JKLU <em>Swap</em></span>
+          </div>
+          <p class="auth-tagline">${escapeHtml(subtitle)}</p>
+          ${formHtml}
+        </div>
+      </div>
+    </div>`;
+}
+
+function bindAuthShellEvents() {
+  initSlideshow();
 }
 
 function stepIndicator(current, total) {
@@ -200,42 +295,43 @@ async function startCamera(videoEl) {
 
 function renderHome() {
   const listings = filterListings(listingsCache);
-  const campuses = new Set(listingsCache.map((l) => l.campus)).size;
 
   const pills = CATEGORIES.map(
     (cat) =>
       `<button class="pill ${state.category === cat.id ? "active" : ""}" data-category="${cat.id}">${cat.emoji} ${cat.label}</button>`
   ).join("");
 
-  const campusOptions = CAMPUSES.map(
-    (c) => `<option value="${c}" ${state.campus === c ? "selected" : ""}>${c}</option>`
-  ).join("");
-
   const grid =
     listings.length > 0
-      ? `<div class="listings-grid">${listings.map((l) => renderListingCard(l)).join("")}</div>`
-      : `<div class="empty-state"><div class="emoji">🔍</div><h3>No listings found</h3><p>Try adjusting your filters or list something!</p><a href="#/sell" class="btn btn-primary">List an Item</a></div>`;
+      ? `<div class="listings-grid">${listings.map((l, i) => renderListingCard(l, { idx: i })).join("")}</div>`
+      : `<div class="empty-state animate-in"><div class="emoji">🔍</div><h3>No listings found</h3><p>Try adjusting your filters or list something on JKLU campus!</p><a href="#/sell" class="btn btn-primary">List an Item</a></div>`;
 
   app.innerHTML = `
-    <section class="hero">
-      <div class="container hero-content">
-        <h1>Your Campus Marketplace</h1>
-        <p>Verified students only. Buy &amp; sell textbooks, electronics, furniture &amp; more on campus.</p>
+    <section class="hero jklu-hero">
+      <div class="hero-bg-slides">
+        ${CAMPUS_PHOTOS.slice(0, 3).map((p, i) => `<div class="hero-bg-slide ${i === 0 ? "active" : ""}" style="background-image:url('${photoUrl(p)}')"></div>`).join("")}
+      </div>
+      <img src="${LOGO.large}" alt="" class="hero-watermark" aria-hidden="true" />
+      <div class="hero-overlay"></div>
+      <div class="hero-shapes"><span class="shape shape-1"></span><span class="shape shape-2"></span><span class="shape shape-3"></span></div>
+      <div class="container hero-content animate-slide-up">
+        <span class="hero-badge">🎓 JK Lakshmipat University</span>
+        <h1>Your <span class="text-gradient">JKLU</span> Marketplace</h1>
+        <p>Verified JKLU students only — buy &amp; sell textbooks, electronics, hostel essentials &amp; more on campus.</p>
         <div class="hero-actions">
-          <a href="#/signup" class="btn btn-primary">Join CampusSwap</a>
+          <a href="#/signup" class="btn btn-primary btn-glow">Join JKLU Swap</a>
           <a href="#/" class="btn btn-secondary" id="browse-btn">Browse Listings</a>
         </div>
       </div>
     </section>
-    <div class="container stats-bar">
-      <div class="stat-card"><strong>${listingsCache.length}</strong><span>Active Listings</span></div>
-      <div class="stat-card"><strong>${campuses}</strong><span>Campuses</span></div>
-      <div class="stat-card"><strong>✓</strong><span>ID Verified</span></div>
+    <div class="container stats-bar animate-in">
+      <div class="stat-card stat-float"><strong>${listingsCache.length}</strong><span>Active Listings</span></div>
+      <div class="stat-card stat-float" style="animation-delay:0.1s"><strong>JKLU</strong><span>One Campus</span></div>
+      <div class="stat-card stat-float" style="animation-delay:0.2s"><strong>✓</strong><span>ID Verified</span></div>
     </div>
-    <section class="filters-section container">
+    <section class="filters-section container animate-in">
       <div class="filters-bar">
-        <div class="search-wrap"><span class="search-icon">🔍</span><input type="search" id="search-input" placeholder="Search listings..." value="${escapeHtml(state.search)}" /></div>
-        <select id="campus-filter">${campusOptions}</select>
+        <div class="search-wrap"><span class="search-icon">🔍</span><input type="search" id="search-input" placeholder="Search JKLU listings..." value="${escapeHtml(state.search)}" /></div>
         <select id="sort-filter">
           <option value="newest" ${state.sort === "newest" ? "selected" : ""}>Newest first</option>
           <option value="price-low" ${state.sort === "price-low" ? "selected" : ""}>Price: Low to High</option>
@@ -244,22 +340,30 @@ function renderHome() {
       </div>
       <div class="category-pills">${pills}</div>
     </section>
-    <section class="container"><h2 class="section-title">${listings.length} listing${listings.length !== 1 ? "s" : ""}</h2>${grid}</section>`;
+    <section class="container"><h2 class="section-title animate-in">${listings.length} listing${listings.length !== 1 ? "s" : ""} at JKLU</h2>${grid}</section>`;
 
   bindFilterEvents();
+  initHeroSlideshow();
   document.getElementById("browse-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     document.querySelector(".filters-section")?.scrollIntoView({ behavior: "smooth" });
   });
 }
 
+function initHeroSlideshow() {
+  const slides = document.querySelectorAll(".hero-bg-slide");
+  if (slides.length < 2) return;
+  let i = 0;
+  setInterval(() => {
+    slides[i].classList.remove("active");
+    i = (i + 1) % slides.length;
+    slides[i].classList.add("active");
+  }, 6000);
+}
+
 function bindFilterEvents() {
   document.getElementById("search-input")?.addEventListener("input", (e) => {
     state.search = e.target.value;
-    render();
-  });
-  document.getElementById("campus-filter")?.addEventListener("change", (e) => {
-    state.campus = e.target.value;
     render();
   });
   document.getElementById("sort-filter")?.addEventListener("change", (e) => {
@@ -276,27 +380,26 @@ function bindFilterEvents() {
 
 function renderSignup(step = 1) {
   stopCamera();
-  const campusOptions = CAMPUSES.filter((c) => c !== "All Campuses")
-    .map((c) => `<option value="${c}" ${signupDraft.campus === c ? "selected" : ""}>${c}</option>`)
-    .join("");
+  stopSlideshow();
 
   let content = "";
 
   if (step === 1) {
     content = `
       ${stepIndicator(1, 3)}
-      <h2>Student Details</h2>
-      <p class="form-subtitle">Enter your name, roll number, and phone for easy access.</p>
+      <h2>Create Account</h2>
+      <p class="form-subtitle">Join the JKLU student marketplace with your official details.</p>
       <form id="signup-step1">
         <div class="form-group"><label for="name">Full Name</label><input class="input" id="name" required placeholder="e.g. Rahul Sharma" value="${escapeHtml(signupDraft.name || "")}" /></div>
         <div class="form-row">
-          <div class="form-group"><label for="rollNumber">Roll Number</label><input class="input" id="rollNumber" required placeholder="e.g. 21CSE1042" value="${escapeHtml(signupDraft.rollNumber || "")}" /></div>
+          <div class="form-group"><label for="rollNumber">Roll Number</label><input class="input" id="rollNumber" required placeholder="e.g. 22BCS1042" value="${escapeHtml(signupDraft.rollNumber || "")}" /></div>
           <div class="form-group"><label for="phone">Phone Number</label><input class="input" id="phone" type="tel" required pattern="[0-9]{10}" placeholder="10-digit mobile" value="${escapeHtml(signupDraft.phone || "")}" /></div>
         </div>
-        <div class="form-group"><label for="collegeEmail">College Email</label><input class="input" id="collegeEmail" type="email" required placeholder="you@college.edu or you@college.ac.in" value="${escapeHtml(signupDraft.collegeEmail || "")}" /><p class="hint">Must be your official college email (.edu or .ac.in)</p></div>
-        <div class="form-group"><label for="campus">Campus</label><select id="campus">${campusOptions}</select></div>
+        <div class="form-group"><label for="collegeEmail">JKLU Email</label><input class="input" id="collegeEmail" type="email" required placeholder="you@jklu.edu.in" value="${escapeHtml(signupDraft.collegeEmail || "")}" /><p class="hint">Use your official @jklu.edu.in email</p></div>
+        <div class="jklu-campus-chip">📍 ${escapeHtml(JKLU.campus)} · ${escapeHtml(JKLU.location)}</div>
         <button type="submit" class="btn btn-accent btn-block">Continue →</button>
-      </form>`;
+      </form>
+      <p class="auth-footer">Already have an account? <a href="#/login">Log in</a></p>`;
   } else if (step === 2) {
     content = `
       ${stepIndicator(2, 3)}
@@ -327,15 +430,14 @@ function renderSignup(step = 1) {
         <button type="submit" class="btn btn-accent btn-block">Verify &amp; Create Account</button>
       </form>
       <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>
-      <button type="button" class="btn btn-ghost btn-block" id="back-step2">← Back</button>`;
+      <button type="button" class="btn btn-ghost btn-block" id="back-step2">← Back</button>
+      <p class="auth-footer">Already have an account? <a href="#/login">Log in</a></p>`;
   }
 
-  app.innerHTML = `
-    <div class="container auth-page">
-      <div class="auth-card wide">${content}
-        <p class="auth-footer">Already have an account? <a href="#/login">Log in</a></p>
-      </div>
-    </div>`;
+  app.innerHTML = renderAuthShell(content, {
+    subtitle: step === 1 ? "Create your JKLU student account" : step === 2 ? "Verify your JKLU identity" : "Almost there — verify your email",
+  });
+  bindAuthShellEvents();
 
   if (step === 1) {
     document.getElementById("signup-step1")?.addEventListener("submit", (e) => {
@@ -346,7 +448,7 @@ function renderSignup(step = 1) {
         rollNumber: document.getElementById("rollNumber").value.trim().toUpperCase(),
         phone: document.getElementById("phone").value.trim(),
         collegeEmail: document.getElementById("collegeEmail").value.trim().toLowerCase(),
-        campus: document.getElementById("campus").value,
+        campus: JKLU.campus,
       };
       renderSignup(2);
     });
@@ -425,7 +527,7 @@ function renderSignup(step = 1) {
       try {
         const data = await api.verifyEmail(signupDraft.collegeEmail, document.getElementById("otp").value.trim());
         setUser(data.user);
-        showToast("Welcome to CampusSwap!");
+        showToast("Welcome to JKLU Swap!");
         navigate("#/");
         render();
       } catch (err) {
@@ -451,19 +553,19 @@ function renderSignup(step = 1) {
 }
 
 function renderLogin() {
-  app.innerHTML = `
-    <div class="container auth-page">
-      <div class="auth-card">
-        <h2>Welcome Back</h2>
-        <p class="form-subtitle">Log in with your college email and roll number.</p>
-        <form id="login-form">
-          <div class="form-group"><label for="login-email">College Email</label><input class="input" id="login-email" type="email" required placeholder="you@college.edu" /></div>
-          <div class="form-group"><label for="login-roll">Roll Number</label><input class="input" id="login-roll" required placeholder="e.g. 21CSE1042" /></div>
-          <button type="submit" class="btn btn-accent btn-block">Log In</button>
-        </form>
-        <p class="auth-footer">New here? <a href="#/signup">Create an account</a></p>
-      </div>
-    </div>`;
+  stopSlideshow();
+  const formHtml = `
+    <h2>Welcome Back</h2>
+    <p class="form-subtitle">Log in with your JKLU email and roll number.</p>
+    <form id="login-form">
+      <div class="form-group"><label for="login-email">JKLU Email</label><input class="input" id="login-email" type="email" required placeholder="you@jklu.edu.in" /></div>
+      <div class="form-group"><label for="login-roll">Roll Number</label><input class="input" id="login-roll" required placeholder="e.g. 22BCS1042" /></div>
+      <button type="submit" class="btn btn-accent btn-block btn-glow">Log In</button>
+    </form>
+    <p class="auth-footer">New to JKLU Swap? <a href="#/signup">Create an account</a></p>`;
+
+  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Welcome back to JKLU Swap" });
+  bindAuthShellEvents();
 
   document.getElementById("login-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -488,6 +590,7 @@ function renderLogin() {
 }
 
 function renderVerify() {
+  stopSlideshow();
   const user = getUser();
   if (!user) {
     navigate("#/login");
@@ -496,19 +599,18 @@ function renderVerify() {
   }
   signupDraft.collegeEmail = user.collegeEmail;
 
-  app.innerHTML = `
-    <div class="container auth-page">
-      <div class="auth-card">
-        <h2>Verify Your Email</h2>
-        <p class="form-subtitle">Enter the code sent to <strong>${escapeHtml(user.collegeEmail)}</strong></p>
-        <div class="verify-notice" id="demo-otp-notice"></div>
-        <form id="verify-form">
-          <div class="form-group"><label for="otp">Verification Code</label><input class="input otp-input" id="otp" required maxlength="6" placeholder="000000" inputmode="numeric" /></div>
-          <button type="submit" class="btn btn-accent btn-block">Verify Email</button>
-        </form>
-        <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>
-      </div>
-    </div>`;
+  const formHtml = `
+    <h2>Verify Your Email</h2>
+    <p class="form-subtitle">Enter the code sent to <strong>${escapeHtml(user.collegeEmail)}</strong></p>
+    <div class="verify-notice" id="demo-otp-notice"></div>
+    <form id="verify-form">
+      <div class="form-group"><label for="otp">Verification Code</label><input class="input otp-input" id="otp" required maxlength="6" placeholder="000000" inputmode="numeric" /></div>
+      <button type="submit" class="btn btn-accent btn-block btn-glow">Verify Email</button>
+    </form>
+    <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>`;
+
+  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Verify your JKLU email to continue" });
+  bindAuthShellEvents();
 
   document.getElementById("verify-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -554,14 +656,23 @@ async function renderDetail(id) {
   const user = getUser();
   const isOwner = user && listing.sellerId === user.id;
   const isSold = listing.status === "sold";
-  const imageContent = listing.image ? `<img src="${listing.image}" alt="" />` : listing.emoji || getCategoryEmoji(listing.category);
+  const imageContent = listing.image
+    ? listingImageHtml(listing.image, escapeHtml(listing.title), "")
+    : `<div class="product-photo product-photo-emoji detail-emoji">${listing.emoji || getCategoryEmoji(listing.category)}</div>`;
   const priceSuffix = listing.category === "services" ? "/hr" : "";
 
   let actions = "";
-  if (isSold) {
+  if (isSold && isOwner) {
+    actions = `
+      <span class="sold-label">Sold — remove when you're done</span>
+      <button class="btn btn-danger" id="remove-sold-btn">Remove Listing</button>`;
+  } else if (isSold) {
     actions = `<span class="sold-label">This item has been sold</span>`;
   } else if (isOwner) {
-    actions = `<span class="owner-label">This is your listing</span>`;
+    actions = `
+      <button class="btn btn-outline" id="mark-sold-btn">Mark as Sold</button>
+      <button class="btn btn-outline" id="delete-listing-btn">Delete Listing</button>
+      <span class="owner-label">This is your listing</span>`;
   } else if (user && isVerified()) {
     actions = `
       <button class="btn btn-accent" id="message-btn">Message Seller</button>
@@ -580,7 +691,7 @@ async function renderDetail(id) {
           <div class="detail-tags">
             <span class="tag">${escapeHtml(getCategoryLabel(listing.category))}</span>
             <span class="tag">${escapeHtml(listing.condition)}</span>
-            <span class="tag">${escapeHtml(listing.campus)}</span>
+            <span class="tag jklu-tag">JKLU</span>
             ${listing.sellerRollNumber ? `<span class="tag verified">✓ Verified Student</span>` : ""}
           </div>
           <h1>${escapeHtml(listing.title)}</h1>
@@ -592,7 +703,7 @@ async function renderDetail(id) {
               <div class="seller-avatar">${initials(listing.sellerName)}</div>
               <div>
                 <div class="seller-name">${escapeHtml(listing.sellerName)}</div>
-                <div class="seller-campus">${escapeHtml(listing.campus)} · Roll: ${escapeHtml(listing.sellerRollNumber || "—")}</div>
+                <div class="seller-campus">JKLU · Roll: ${escapeHtml(listing.sellerRollNumber || "—")}</div>
                 ${user && isVerified() ? `<div class="seller-contact">📞 ${escapeHtml(listing.sellerPhone || "—")}</div>` : ""}
               </div>
             </div>
@@ -620,6 +731,44 @@ async function renderDetail(id) {
       showToast("Could not copy link");
     }
   });
+
+  document.getElementById("mark-sold-btn")?.addEventListener("click", async () => {
+    if (!confirm("Mark this item as sold? It will be hidden from browse.")) return;
+    try {
+      await api.markListingSold(listing.id);
+      await fetchListings();
+      showToast("Item marked as sold!");
+      renderDetail(id);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("remove-sold-btn")?.addEventListener("click", async () => {
+    if (!confirm("Remove this sold listing permanently?")) return;
+    try {
+      await api.deleteListing(listing.id);
+      await fetchListings();
+      showToast("Listing removed");
+      navigate("#/profile");
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("delete-listing-btn")?.addEventListener("click", async () => {
+    if (!confirm("Delete this listing?")) return;
+    try {
+      await api.deleteListing(listing.id);
+      await fetchListings();
+      showToast("Listing deleted");
+      navigate("#/profile");
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
 }
 
 function renderSell() {
@@ -631,37 +780,53 @@ function renderSell() {
   const user = getUser();
   const categoryOptions = CATEGORIES.filter((c) => c.id !== "all")
     .map((c) => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join("");
-  const campusOptions = CAMPUSES.filter((c) => c !== "All Campuses")
-    .map((c) => `<option value="${c}" ${user.campus === c ? "selected" : ""}>${c}</option>`).join("");
   const conditionOptions = CONDITIONS.map((c) => `<option value="${c}">${c}</option>`).join("");
 
   app.innerHTML = `
-    <div class="container">
-      <div class="page-header"><h1>List an Item</h1><p>Selling as <strong>${escapeHtml(user.name)}</strong> (${escapeHtml(user.rollNumber)})</p></div>
-      <form class="form-card" id="sell-form">
-        <div class="form-group"><label for="title">Title</label><input class="input" id="title" required maxlength="100" placeholder="e.g. Calculus Textbook — 8th Edition" /></div>
+    <div class="container animate-fade">
+      <div class="page-header"><h1>List an Item</h1><p>Selling at <strong>${escapeHtml(JKLU.campus)}</strong> as ${escapeHtml(user.name)} (${escapeHtml(user.rollNumber)})</p></div>
+      <form class="form-card animate-slide-up" id="sell-form">
+        <div class="form-group"><label for="title">Title</label><input class="input" id="title" required maxlength="100" placeholder="e.g. Engineering Mathematics — Grewal" /></div>
         <div class="form-row">
           <div class="form-group"><label for="price">Price (₹)</label><input class="input" id="price" type="number" required min="0" step="1" placeholder="0" /></div>
           <div class="form-group"><label for="category">Category</label><select id="category" required>${categoryOptions}</select></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label for="condition">Condition</label><select id="condition" required>${conditionOptions}</select></div>
-          <div class="form-group"><label for="campus">Campus</label><select id="campus" required>${campusOptions}</select></div>
+          <div class="form-group"><label>Pickup Location</label><div class="jklu-campus-chip">📍 ${escapeHtml(JKLU.campus)}</div></div>
         </div>
         <div class="form-group"><label for="description">Description</label><textarea class="input" id="description" required maxlength="500" placeholder="Condition, pickup location, etc."></textarea></div>
-        <div class="form-group"><label for="image">Photo (optional)</label><input class="input" id="image" type="file" accept="image/*" /><div class="image-preview" id="image-preview"></div></div>
+        <div class="form-group">
+          <label for="image">Photo (optional)</label>
+          <input class="input" id="image" type="file" accept="image/*" />
+          <p class="hint">Tip: Use a plain background for best results. We'll auto-crop and clean it up.</p>
+          <div class="upload-preview" id="image-preview"></div>
+        </div>
         <button type="submit" class="btn btn-accent btn-block">Publish Listing</button>
       </form>
     </div>`;
 
   let imageData = null;
-  document.getElementById("image")?.addEventListener("change", (e) => {
+  document.getElementById("image")?.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     const preview = document.getElementById("image-preview");
-    if (!file) { imageData = null; preview.classList.remove("visible"); preview.innerHTML = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => { imageData = reader.result; preview.classList.add("visible"); preview.innerHTML = `<img src="${imageData}" alt="Preview" />`; };
-    reader.readAsDataURL(file);
+    if (!file) {
+      imageData = null;
+      preview.classList.remove("visible");
+      preview.innerHTML = "";
+      return;
+    }
+    preview.classList.add("visible", "loading");
+    preview.innerHTML = `<span class="preview-loading">Processing photo…</span>`;
+    try {
+      imageData = await processListingImage(file);
+      preview.classList.remove("loading");
+      preview.innerHTML = `<div class="product-photo product-photo-lg"><img src="${imageData}" alt="Preview" /></div>`;
+    } catch (err) {
+      preview.classList.remove("loading", "visible");
+      preview.innerHTML = "";
+      showToast(err.message || "Could not process image");
+    }
   });
 
   document.getElementById("sell-form")?.addEventListener("submit", async (e) => {
@@ -674,7 +839,7 @@ function renderSell() {
         price: parseFloat(document.getElementById("price").value),
         category,
         condition: document.getElementById("condition").value,
-        campus: document.getElementById("campus").value,
+        campus: JKLU.campus,
         emoji: getCategoryEmoji(category),
         image: imageData,
       });
@@ -695,42 +860,94 @@ function renderProfile() {
   }
 
   const user = getUser();
-  const myListings = listingsCache.filter((l) => l.sellerId === user.id);
-  const listingsGrid = myListings.length
-    ? `<div class="listings-grid">${myListings.map((l) => renderListingCard(l, { showActions: true })).join("")}</div>`
-    : `<div class="empty-state"><div class="emoji">📭</div><h3>No listings yet</h3><a href="#/sell" class="btn btn-primary">List Your First Item</a></div>`;
+  const myListings = myListingsCache;
+  const activeCount = myListings.filter((l) => l.status !== "sold").length;
+  const soldCount = myListings.filter((l) => l.status === "sold").length;
+
+  const activeListings = myListings.filter((l) => l.status !== "sold");
+  const soldListings = myListings.filter((l) => l.status === "sold");
+
+  const activeGrid = activeListings.length
+    ? `<div class="listings-grid">${activeListings.map((l, i) => renderListingCard(l, { showActions: true, idx: i })).join("")}</div>`
+    : `<div class="empty-state compact"><p>No active listings. <a href="#/sell">List something!</a></p></div>`;
+
+  const soldGrid = soldListings.length
+    ? `<div class="listings-grid">${soldListings.map((l, i) => renderListingCard(l, { showActions: true, idx: i })).join("")}</div>`
+    : "";
 
   app.innerHTML = `
     <div class="container">
       <div class="page-header"><h1>Your Profile</h1><p>Verified campus student account</p></div>
       <div class="profile-grid">
         <aside class="profile-sidebar">
+          <div class="profile-logo-wrap logo-on-white">
+            <img src="${LOGO.large}" alt="JKLU" class="jklu-logo profile-logo" />
+          </div>
           <div class="profile-avatar-lg">${initials(user.name)}</div>
           <h2>${escapeHtml(user.name)}</h2>
           <p class="campus-label">${escapeHtml(user.collegeEmail)}</p>
           <p class="campus-label">Roll: ${escapeHtml(user.rollNumber)}</p>
           <p class="campus-label">📞 ${escapeHtml(user.phone)}</p>
-          <p class="campus-label">${escapeHtml(user.campus)}</p>
+          <p class="campus-label">📍 ${escapeHtml(JKLU.campus)} · ${escapeHtml(JKLU.location)}</p>
           <div class="verify-badges">
             ${user.emailVerified ? '<span class="badge badge-green">✓ Email Verified</span>' : ""}
             ${user.idVerified ? '<span class="badge badge-green">✓ ID Verified</span>' : ""}
           </div>
           <div class="profile-stats">
-            <div class="profile-stat"><strong>${myListings.length}</strong><span>My Listings</span></div>
-            <div class="profile-stat"><strong>${listingsCache.length}</strong><span>Total on Site</span></div>
+            <div class="profile-stat"><strong>${activeCount}</strong><span>Active</span></div>
+            <div class="profile-stat"><strong>${soldCount}</strong><span>Sold</span></div>
           </div>
         </aside>
-        <div><h2 class="section-title">My Listings</h2><div class="my-listings">${listingsGrid}</div></div>
+        <div>
+          <h2 class="section-title">Active Listings</h2>
+          <div class="my-listings">${activeGrid}</div>
+          ${soldListings.length ? `<h2 class="section-title sold-section-title">Sold — Remove when done</h2><p class="section-hint">These are hidden from browse. Tap <strong>Remove Listing</strong> to delete them.</p>${soldGrid}` : ""}
+        </div>
       </div>
     </div>`;
 
+  bindListingActions();
+}
+
+function bindListingActions() {
   document.querySelectorAll("[data-action='delete']").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this listing?")) return;
       try {
         await api.deleteListing(btn.dataset.id);
         await fetchListings();
+        await fetchMyListings();
         showToast("Listing deleted");
+        render();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='mark-sold']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Mark this item as sold? It will be hidden from browse.")) return;
+      try {
+        await api.markListingSold(btn.dataset.id);
+        await fetchListings();
+        await fetchMyListings();
+        showToast("Item marked as sold!");
+        render();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remove this sold listing permanently?")) return;
+      try {
+        await api.deleteListing(btn.dataset.id);
+        await fetchListings();
+        await fetchMyListings();
+        showToast("Sold listing removed");
         render();
       } catch (err) {
         showToast(err.message);
@@ -866,6 +1083,7 @@ async function renderCheckout(listingId) {
 
 async function render() {
   stopCamera();
+  stopSlideshow();
   const { path } = parseRoute();
 
   if (path.startsWith("/item/")) {
@@ -904,7 +1122,7 @@ async function render() {
       break;
     case "/profile":
       setActiveNav("/profile");
-      await fetchListings();
+      await fetchMyListings();
       renderProfile();
       break;
     case "/messages":
@@ -923,6 +1141,7 @@ nav?.addEventListener("click", () => nav.classList.remove("open"));
 window.addEventListener("hashchange", render);
 
 async function init() {
+  initAmbient();
   await loadSession();
   updateHeader();
   render();

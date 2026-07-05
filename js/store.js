@@ -45,7 +45,7 @@ export function getProfile() {
   return read(PROFILE_KEY, {
     name: "",
     email: "",
-    campus: "Central Campus",
+    campus: "JKLU Campus",
   });
 }
 

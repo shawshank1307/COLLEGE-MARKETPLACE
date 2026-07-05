@@ -59,10 +59,15 @@ export const api = {
 
   getListings: () => request("/api/listings"),
 
+  getMyListings: () => request("/api/my-listings"),
+
   getListing: (id) => request(`/api/listings/${id}`),
 
   createListing: (listing) =>
     request("/api/listings", { method: "POST", body: listing }),
+
+  markListingSold: (id) =>
+    request(`/api/listings/${id}/mark-sold`, { method: "POST" }),
 
   deleteListing: (id) =>
     request(`/api/listings/${id}`, { method: "DELETE" }),

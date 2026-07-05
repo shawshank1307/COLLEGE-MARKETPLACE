@@ -1,6 +1,6 @@
-# CampusSwap — College Marketplace
+# JKLU Swap — JK Lakshmipat University Marketplace
 
-A campus student marketplace for buying and selling textbooks, electronics, furniture, and more — verified students only.
+A campus student marketplace built for **JK Lakshmipat University (JKLU)**, Jaipur — buy and sell textbooks, electronics, hostel essentials, and more.
 
 ## Features
 

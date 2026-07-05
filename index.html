@@ -3,18 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CampusSwap — Student Marketplace</title>
+  <title>JKLU Swap — JK Lakshmipat University Marketplace</title>
+  <meta name="description" content="JKLU's student marketplace — buy and sell textbooks, electronics, and more on campus." />
+  <link rel="icon" type="image/png" href="assets/jklu/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/jklu/logo-large.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/ambient.css" />
 </head>
 <body>
+  <div class="page-bg" aria-hidden="true"></div>
+  <div class="ambient-layer" id="ambient-layer" aria-hidden="true"></div>
+  <img src="assets/jklu/logo-large.png" alt="" class="corner-logo corner-logo-tr" aria-hidden="true" />
+  <img src="assets/jklu/logo-large.png" alt="" class="corner-logo corner-logo-bl" aria-hidden="true" />
+
   <header class="header">
     <div class="container header-inner">
       <a href="#/" class="logo">
-        <span class="logo-icon">🎓</span>
-        <span class="logo-text">CampusSwap</span>
+        <span class="logo-on-white header-logo-wrap">
+          <img src="assets/jklu/logo-header.png" alt="JKLU" class="jklu-logo header-logo" />
+        </span>
+        <span class="logo-text">JKLU <em>Swap</em></span>
       </a>
       <nav class="nav" id="main-nav">
         <a href="#/" class="nav-link active" data-route="/">Browse</a>
@@ -34,9 +45,11 @@
   <footer class="footer">
     <div class="container footer-inner">
       <div class="footer-brand">
-        <span class="logo-icon">🎓</span>
-        <strong>CampusSwap</strong>
-        <p>Buy &amp; sell safely within your campus community.</p>
+        <div class="logo-on-white footer-logo-wrap">
+          <img src="assets/jklu/logo-large.png" alt="JK Lakshmipat University" class="jklu-logo footer-logo" />
+        </div>
+        <strong>JKLU Swap</strong>
+        <p>JK Lakshmipat University's trusted student marketplace.<br />Mahapura, Jaipur — 302 026</p>
       </div>
       <div class="footer-links">
         <a href="#/">Browse</a>
@@ -46,7 +59,7 @@
       </div>
     </div>
     <div class="footer-bottom container">
-      <p>&copy; 2026 CampusSwap. Built for students, by students.</p>
+      <p>&copy; 2026 JKLU Swap · Built for JK Lakshmipat University students</p>
     </div>
   </footer>
 

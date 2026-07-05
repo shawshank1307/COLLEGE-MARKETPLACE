@@ -1,0 +1,367 @@
+/* Ambient background — butterflies, flowers, soft glow orbs */
+
+.ambient-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.page-bg {
+  z-index: -1;
+}
+
+.header,
+main,
+.footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* Soft drifting orbs */
+.ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.35;
+  animation: orb-drift 20s ease-in-out infinite;
+}
+
+.ambient-orb-1 {
+  width: 280px;
+  height: 280px;
+  background: rgba(194, 86, 62, 0.25);
+  top: 8%;
+  left: -5%;
+  animation-duration: 22s;
+}
+
+.ambient-orb-2 {
+  width: 220px;
+  height: 220px;
+  background: rgba(11, 61, 122, 0.15);
+  top: 55%;
+  right: -3%;
+  animation-delay: -8s;
+  animation-duration: 26s;
+}
+
+.ambient-orb-3 {
+  width: 180px;
+  height: 180px;
+  background: rgba(255, 182, 193, 0.3);
+  bottom: 15%;
+  left: 20%;
+  animation-delay: -14s;
+  animation-duration: 18s;
+}
+
+@keyframes orb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -25px) scale(1.05); }
+  66% { transform: translate(-20px, 20px) scale(0.95); }
+}
+
+/* Butterflies */
+.ambient-butterfly {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  opacity: 0;
+  animation: butterfly-fade-in 2s ease forwards, butterfly-flight var(--fly-duration, 18s) ease-in-out infinite;
+  animation-delay: var(--fly-delay, 0s), var(--fly-delay, 0s);
+  filter: drop-shadow(0 0 6px rgba(255, 200, 100, 0.7))
+          drop-shadow(0 0 12px rgba(255, 150, 80, 0.4));
+}
+
+.ambient-butterfly svg {
+  width: 100%;
+  height: 100%;
+  animation: wing-flutter 0.35s ease-in-out infinite alternate;
+}
+
+@keyframes butterfly-fade-in {
+  to { opacity: var(--b-opacity, 0.75); }
+}
+
+@keyframes wing-flutter {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0.85); }
+}
+
+@keyframes butterfly-flight {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.9);
+  }
+  25% {
+    transform: translate(80px, -60px) rotate(8deg) scale(1);
+  }
+  50% {
+    transform: translate(40px, -120px) rotate(-5deg) scale(0.95);
+  }
+  75% {
+    transform: translate(-50px, -70px) rotate(6deg) scale(1.05);
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(0.9);
+  }
+}
+
+.butterfly-1 { top: 12%; left: 8%; --fly-duration: 20s; --fly-delay: 0s; --b-opacity: 0.7; }
+.butterfly-2 { top: 28%; right: 12%; --fly-duration: 24s; --fly-delay: -4s; --b-opacity: 0.55; width: 22px; height: 22px; }
+.butterfly-3 { top: 65%; left: 5%; --fly-duration: 22s; --fly-delay: -9s; --b-opacity: 0.65; width: 24px; height: 24px; }
+.butterfly-4 { top: 45%; right: 6%; --fly-duration: 19s; --fly-delay: -6s; --b-opacity: 0.5; width: 20px; height: 20px; }
+.butterfly-5 { top: 78%; right: 22%; --fly-duration: 26s; --fly-delay: -12s; --b-opacity: 0.6; }
+.butterfly-6 { top: 18%; left: 42%; --fly-duration: 21s; --fly-delay: -3s; --b-opacity: 0.45; width: 18px; height: 18px; }
+
+/* Flowers */
+.ambient-flower {
+  position: absolute;
+  font-size: var(--f-size, 1.4rem);
+  opacity: 0;
+  animation: flower-fade-in 2.5s ease forwards, flower-sway var(--sway-duration, 6s) ease-in-out infinite;
+  animation-delay: var(--sway-delay, 0s), var(--sway-delay, 0s);
+  filter: drop-shadow(0 0 8px rgba(255, 150, 180, 0.5))
+          drop-shadow(0 0 4px rgba(255, 200, 220, 0.6));
+  transform-origin: center bottom;
+}
+
+@keyframes flower-fade-in {
+  to { opacity: var(--f-opacity, 0.55); }
+}
+
+@keyframes flower-sway {
+  0%, 100% {
+    transform: translateY(0) rotate(-3deg) scale(1);
+  }
+  50% {
+    transform: translateY(-12px) rotate(4deg) scale(1.05);
+  }
+}
+
+@keyframes flower-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255, 150, 180, 0.4)); }
+  50% { filter: drop-shadow(0 0 14px rgba(255, 180, 200, 0.75)); }
+}
+
+.flower-1 { top: 20%; left: 3%; --f-size: 1.6rem; --sway-duration: 7s; --sway-delay: 0s; --f-opacity: 0.5; animation: flower-fade-in 2.5s ease forwards, flower-sway 7s ease-in-out infinite, flower-glow 4s ease-in-out infinite; }
+.flower-2 { top: 35%; right: 4%; --f-size: 1.2rem; --sway-duration: 5.5s; --sway-delay: -2s; --f-opacity: 0.45; animation: flower-fade-in 2.5s ease forwards, flower-sway 5.5s ease-in-out infinite, flower-glow 5s ease-in-out infinite; }
+.flower-3 { bottom: 25%; left: 8%; --f-size: 1.5rem; --sway-duration: 8s; --sway-delay: -4s; --f-opacity: 0.55; animation: flower-fade-in 2.5s ease forwards, flower-sway 8s ease-in-out infinite, flower-glow 4.5s ease-in-out infinite; }
+.flower-4 { bottom: 35%; right: 8%; --f-size: 1.3rem; --sway-duration: 6s; --sway-delay: -1s; --f-opacity: 0.4; }
+.flower-5 { top: 55%; left: 2%; --f-size: 1.1rem; --sway-duration: 7.5s; --sway-delay: -6s; --f-opacity: 0.35; }
+.flower-6 { top: 8%; right: 28%; --f-size: 1.25rem; --sway-duration: 6.5s; --sway-delay: -3s; --f-opacity: 0.5; animation: flower-fade-in 2.5s ease forwards, flower-sway 6.5s ease-in-out infinite, flower-glow 3.5s ease-in-out infinite; }
+.flower-7 { bottom: 12%; left: 35%; --f-size: 1.15rem; --sway-duration: 5s; --sway-delay: -5s; --f-opacity: 0.4; }
+.flower-8 { top: 72%; right: 3%; --f-size: 1.4rem; --sway-duration: 7s; --sway-delay: -7s; --f-opacity: 0.45; animation: flower-fade-in 2.5s ease forwards, flower-sway 7s ease-in-out infinite, flower-glow 5s ease-in-out infinite; }
+
+/* Floating petals */
+.ambient-petal {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: linear-gradient(135deg, #ffb6c1, #ffc0cb);
+  border-radius: 50% 0 50% 50%;
+  opacity: 0;
+  animation: petal-fall var(--fall-duration, 14s) linear infinite;
+  animation-delay: var(--fall-delay, 0s);
+  box-shadow: 0 0 6px rgba(255, 182, 193, 0.6);
+}
+
+@keyframes petal-fall {
+  0% {
+    opacity: 0;
+    transform: translateY(-10vh) rotate(0deg) translateX(0);
+  }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.4; }
+  100% {
+    opacity: 0;
+    transform: translateY(105vh) rotate(360deg) translateX(60px);
+  }
+}
+
+.petal-1 { left: 15%; --fall-duration: 16s; --fall-delay: 0s; }
+.petal-2 { left: 45%; --fall-duration: 18s; --fall-delay: -5s; width: 6px; height: 6px; }
+.petal-3 { left: 72%; --fall-duration: 15s; --fall-delay: -9s; }
+.petal-4 { left: 88%; --fall-duration: 20s; --fall-delay: -3s; width: 7px; height: 7px; }
+.petal-5 { left: 30%; --fall-duration: 17s; --fall-delay: -12s; }
+
+/* Sparkle dots */
+.ambient-sparkle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #fff;
+  border-radius: 50%;
+  opacity: 0;
+  animation: sparkle 3s ease-in-out infinite;
+  animation-delay: var(--spark-delay, 0s);
+  box-shadow: 0 0 8px 2px rgba(255, 220, 150, 0.8);
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 0.9; transform: scale(1.2); }
+}
+
+.sparkle-1 { top: 15%; left: 25%; --spark-delay: 0s; }
+.sparkle-2 { top: 40%; left: 70%; --spark-delay: -1s; }
+.sparkle-3 { top: 60%; left: 15%; --spark-delay: -2s; }
+.sparkle-4 { top: 80%; left: 55%; --spark-delay: -0.5s; }
+.sparkle-5 { top: 25%; left: 85%; --spark-delay: -1.5s; }
+.sparkle-6 { top: 50%; left: 48%; --spark-delay: -2.5s; }
+
+/* Books & laptops — butterfly-style roaming */
+.ambient-roamer {
+  position: absolute;
+  opacity: 0;
+  animation: roamer-fade-in 2s ease forwards, roamer-flight var(--roam-duration, 22s) ease-in-out infinite;
+  animation-delay: var(--roam-delay, 0s), var(--roam-delay, 0s);
+  transform-origin: center center;
+}
+
+.roamer-inner {
+  display: block;
+  animation: roamer-flutter 1.2s ease-in-out infinite;
+}
+
+.ambient-laptop .roamer-inner {
+  animation-duration: 1.5s;
+}
+
+.ambient-roamer::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 220, 150, 0.35) 0%, transparent 70%);
+  z-index: -1;
+  animation: roamer-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes roamer-fade-in {
+  to { opacity: var(--roam-opacity, 0.55); }
+}
+
+@keyframes roamer-glow {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
+
+@keyframes roamer-flight {
+  0% { transform: translate(0, 0) rotate(-5deg) scale(0.95); }
+  20% { transform: translate(70px, -50px) rotate(8deg) scale(1); }
+  40% { transform: translate(30px, -100px) rotate(-6deg) scale(0.9); }
+  60% { transform: translate(-60px, -40px) rotate(10deg) scale(1.05); }
+  80% { transform: translate(-30px, 30px) rotate(-4deg) scale(0.95); }
+  100% { transform: translate(0, 0) rotate(-5deg) scale(0.95); }
+}
+
+@keyframes roamer-flutter {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.08) rotate(3deg); }
+}
+
+.ambient-book {
+  font-size: var(--roam-size, 1.5rem);
+  filter: drop-shadow(0 0 8px rgba(11, 61, 122, 0.35))
+          drop-shadow(0 0 14px rgba(194, 86, 62, 0.25));
+}
+
+.ambient-laptop {
+  font-size: var(--roam-size, 1.4rem);
+  filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.45))
+          drop-shadow(0 0 6px rgba(11, 61, 122, 0.3));
+}
+
+.ambient-book .roamer-inner,
+.ambient-laptop .roamer-inner {
+  font-size: inherit;
+}
+
+.book-1 { top: 10%; left: 18%; --roam-duration: 23s; --roam-delay: -2s; --roam-opacity: 0.5; --roam-size: 1.6rem; }
+.book-2 { top: 38%; right: 15%; --roam-duration: 26s; --roam-delay: -7s; --roam-opacity: 0.45; --roam-size: 1.35rem; }
+.book-3 { top: 58%; left: 12%; --roam-duration: 21s; --roam-delay: -11s; --roam-opacity: 0.55; --roam-size: 1.5rem; }
+.book-4 { bottom: 18%; right: 18%; --roam-duration: 25s; --roam-delay: -5s; --roam-opacity: 0.4; --roam-size: 1.25rem; }
+.book-5 { top: 22%; left: 55%; --roam-duration: 28s; --roam-delay: -14s; --roam-opacity: 0.48; --roam-size: 1.4rem; }
+
+.laptop-1 { top: 32%; left: 6%; --roam-duration: 24s; --roam-delay: -4s; --roam-opacity: 0.52; --roam-size: 1.55rem; }
+.laptop-2 { top: 48%; right: 10%; --roam-duration: 27s; --roam-delay: -9s; --roam-opacity: 0.46; --roam-size: 1.3rem; }
+.laptop-3 { bottom: 28%; left: 28%; --roam-duration: 22s; --roam-delay: -13s; --roam-opacity: 0.5; --roam-size: 1.45rem; }
+.laptop-4 { top: 68%; right: 32%; --roam-duration: 29s; --roam-delay: -6s; --roam-opacity: 0.42; --roam-size: 1.2rem; }
+
+/* Maths equations — roaming */
+.ambient-math {
+  position: absolute;
+  font-family: "Times New Roman", Georgia, serif;
+  font-style: italic;
+  font-size: var(--math-size, 0.95rem);
+  font-weight: 500;
+  color: rgba(11, 61, 122, 0.35);
+  white-space: nowrap;
+  opacity: 0;
+  letter-spacing: 0.02em;
+  animation: math-fade-in 3s ease forwards, math-roam var(--math-duration, 30s) ease-in-out infinite;
+  animation-delay: var(--math-delay, 0s), var(--math-delay, 0s);
+  text-shadow: 0 0 12px rgba(11, 61, 122, 0.2), 0 0 20px rgba(194, 86, 62, 0.1);
+  filter: drop-shadow(0 0 6px rgba(100, 149, 237, 0.25));
+}
+
+@keyframes math-fade-in {
+  to { opacity: var(--math-opacity, 0.4); }
+}
+
+@keyframes math-roam {
+  0% { transform: translate(0, 0) rotate(-8deg); }
+  25% { transform: translate(100px, -40px) rotate(5deg); }
+  50% { transform: translate(50px, -90px) rotate(-3deg); }
+  75% { transform: translate(-80px, -20px) rotate(7deg); }
+  100% { transform: translate(0, 0) rotate(-8deg); }
+}
+
+@keyframes math-glow-pulse {
+  0%, 100% { color: rgba(11, 61, 122, 0.3); text-shadow: 0 0 8px rgba(11, 61, 122, 0.15); }
+  50% { color: rgba(11, 61, 122, 0.5); text-shadow: 0 0 16px rgba(59, 130, 246, 0.35); }
+}
+
+.math-1 { top: 14%; left: 10%; --math-duration: 32s; --math-delay: 0s; --math-opacity: 0.38; --math-size: 1rem; animation: math-fade-in 3s ease forwards, math-roam 32s ease-in-out infinite, math-glow-pulse 4s ease-in-out infinite; }
+.math-2 { top: 25%; right: 8%; --math-duration: 28s; --math-delay: -3s; --math-opacity: 0.35; --math-size: 0.9rem; }
+.math-3 { top: 42%; left: 4%; --math-duration: 35s; --math-delay: -8s; --math-opacity: 0.42; --math-size: 1.05rem; animation: math-fade-in 3s ease forwards, math-roam 35s ease-in-out infinite, math-glow-pulse 5s ease-in-out infinite; }
+.math-4 { top: 52%; right: 6%; --math-duration: 30s; --math-delay: -12s; --math-opacity: 0.32; --math-size: 0.85rem; }
+.math-5 { bottom: 30%; left: 6%; --math-duration: 33s; --math-delay: -5s; --math-opacity: 0.4; --math-size: 0.95rem; }
+.math-6 { bottom: 22%; right: 12%; --math-duration: 27s; --math-delay: -10s; --math-opacity: 0.36; --math-size: 1rem; animation: math-fade-in 3s ease forwards, math-roam 27s ease-in-out infinite, math-glow-pulse 4.5s ease-in-out infinite; }
+.math-7 { top: 68%; left: 22%; --math-duration: 31s; --math-delay: -15s; --math-opacity: 0.33; --math-size: 0.88rem; }
+.math-8 { top: 8%; left: 38%; --math-duration: 29s; --math-delay: -7s; --math-opacity: 0.37; --math-size: 0.92rem; }
+.math-9 { bottom: 40%; right: 25%; --math-duration: 34s; --math-delay: -18s; --math-opacity: 0.34; --math-size: 0.9rem; }
+.math-10 { top: 75%; right: 5%; --math-duration: 26s; --math-delay: -2s; --math-opacity: 0.4; --math-size: 1.02rem; animation: math-fade-in 3s ease forwards, math-roam 26s ease-in-out infinite, math-glow-pulse 3.5s ease-in-out infinite; }
+
+@media (max-width: 768px) {
+  .ambient-butterfly,
+  .ambient-petal,
+  .ambient-sparkle,
+  .ambient-roamer {
+    display: none;
+  }
+  .ambient-math {
+    --math-opacity: 0.22 !important;
+    font-size: 0.75rem !important;
+  }
+  .ambient-math:nth-child(n+6) {
+    display: none;
+  }
+  .ambient-flower {
+    --f-opacity: 0.3 !important;
+    font-size: 1rem !important;
+  }
+  .ambient-flower:nth-child(n+6) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-layer *,
+  .ambient-orb {
+    animation: none !important;
+    opacity: 0.2 !important;
+  }
+}

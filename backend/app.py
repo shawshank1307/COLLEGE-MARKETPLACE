@@ -52,7 +52,7 @@ def init_db():
             roll_number TEXT NOT NULL UNIQUE,
             phone TEXT NOT NULL,
             college_email TEXT NOT NULL UNIQUE,
-            campus TEXT NOT NULL DEFAULT 'Central Campus',
+            campus TEXT NOT NULL DEFAULT 'JKLU Campus',
             id_card_path TEXT NOT NULL,
             email_verified INTEGER NOT NULL DEFAULT 0,
             id_verified INTEGER NOT NULL DEFAULT 0,
@@ -136,22 +136,22 @@ def init_db():
 def seed_listings(db):
     now = time.time()
     samples = [
-        ("1", "Calculus Early Transcendentals — 8th Edition", "Used for MATH 101. Minimal highlighting.", 45, "textbooks", "Good", "North Campus", "📚", now - 172800),
-        ("2", "MacBook Air M1 — 256GB", "Battery health 92%. Comes with charger.", 650, "electronics", "Like New", "Central Campus", "💻", now - 86400),
-        ("3", "IKEA Desk + Chair Set", "Compact desk with adjustable chair.", 80, "furniture", "Good", "South Campus", "🛋️", now - 345600),
-        ("4", "Organic Chemistry Tutoring — ₹25/hr", "A+ in OChem I & II. Evenings and weekends.", 25, "services", "Like New", "East Campus", "🛠️", now - 43200),
-        ("5", "University Hoodie — Size M", "Official campus merch, worn twice.", 35, "clothing", "Like New", "West Campus", "👕", now - 259200),
-        ("6", "Mini Fridge — Great for Dorms", "Works perfectly. Quiet compressor.", 60, "other", "Good", "North Campus", "📦", now - 432000),
+        ("1", "Engineering Mathematics — Grewal", "Used for B.Tech Sem 1. Minimal highlighting.", 350, "textbooks", "Good", "JKLU Campus", "📚", now - 172800),
+        ("2", "MacBook Air M1 — Perfect for CSE", "Battery health 92%. Comes with charger.", 45000, "electronics", "Like New", "JKLU Campus", "💻", now - 86400),
+        ("3", "Study Desk + Chair — Hostel Ready", "Compact desk with chair.", 2500, "furniture", "Good", "JKLU Campus", "🛋️", now - 345600),
+        ("4", "DSA & OS Tutoring — ₹300/hr", "CSE 3rd year. Evenings at JKLU campus.", 300, "services", "Like New", "JKLU Campus", "🛠️", now - 43200),
+        ("5", "JKLU Hoodie — Size M", "Official JKLU merch, worn twice.", 800, "clothing", "Like New", "JKLU Campus", "👕", now - 259200),
+        ("6", "Mini Fridge for Hostel Room", "Works perfectly. Quiet compressor.", 3500, "other", "Good", "JKLU Campus", "📦", now - 432000),
     ]
     db.execute(
         """
         INSERT INTO users (name, roll_number, phone, college_email, campus, id_card_path, email_verified, id_verified, created_at)
-        VALUES ('Demo Seller', 'DEMO001', '9999999999', 'demo@university.edu', 'Central Campus', 'seed', 1, 1, ?)
+        VALUES ('Demo Seller', 'DEMO001', '9999999999', 'demo@jklu.edu.in', 'JKLU Campus', 'seed', 1, 1, ?)
         ON CONFLICT(college_email) DO NOTHING
         """,
         (now,),
     )
-    seller = db.execute("SELECT id FROM users WHERE college_email = 'demo@university.edu'").fetchone()
+    seller = db.execute("SELECT id FROM users WHERE college_email = 'demo@jklu.edu.in'").fetchone()
     if seller:
         for row in samples:
             db.execute(
@@ -254,7 +254,7 @@ def signup():
     roll_number = (request.form.get("rollNumber") or "").strip().upper()
     phone = (request.form.get("phone") or "").strip()
     college_email = (request.form.get("collegeEmail") or "").strip().lower()
-    campus = (request.form.get("campus") or "Central Campus").strip()
+    campus = (request.form.get("campus") or "JKLU Campus").strip()
     id_card = request.files.get("idCard")
 
     if not all([name, roll_number, phone, college_email, campus]):
@@ -500,6 +500,61 @@ def create_listing(user):
     )
     get_db().commit()
     return get_listing(listing_id)
+
+
+@app.route("/api/my-listings")
+@require_auth
+def my_listings(user):
+    rows = get_db().execute(
+        """
+        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+               u.phone AS seller_phone, u.roll_number AS seller_roll
+        FROM listings l
+        JOIN users u ON u.id = l.seller_id
+        WHERE l.seller_id = ?
+        ORDER BY l.created_at DESC
+        """,
+        (user["id"],),
+    ).fetchall()
+    listings = []
+    for row in rows:
+        seller = {
+            "name": row["seller_name"],
+            "college_email": row["seller_email"],
+            "phone": row["seller_phone"],
+            "roll_number": row["seller_roll"],
+        }
+        listings.append(listing_to_dict(row, seller))
+    return jsonify({"listings": listings})
+
+
+@app.route("/api/listings/<listing_id>/mark-sold", methods=["POST"])
+@require_auth
+def mark_listing_sold(user, listing_id):
+    row = get_db().execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "Listing not found."}), 404
+    if row["seller_id"] != user["id"]:
+        return jsonify({"error": "You can only update your own listings."}), 403
+    if row["status"] == "sold":
+        return jsonify({"message": "Already marked as sold.", "listing": listing_to_dict(row)})
+    get_db().execute("UPDATE listings SET status = 'sold' WHERE id = ?", (listing_id,))
+    get_db().commit()
+    updated = get_db().execute(
+        """
+        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+               u.phone AS seller_phone, u.roll_number AS seller_roll
+        FROM listings l JOIN users u ON u.id = l.seller_id WHERE l.id = ?
+        """,
+        (listing_id,),
+    ).fetchone()
+    seller = {
+        "name": updated["seller_name"],
+        "college_email": updated["seller_email"],
+        "phone": updated["seller_phone"],
+        "roll_number": updated["seller_roll"],
+    }
+    return jsonify({"message": "Item marked as sold.", "listing": listing_to_dict(updated, seller)})
 
 
 @app.route("/api/listings/<listing_id>", methods=["DELETE"])

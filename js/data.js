@@ -1,3 +1,5 @@
+import { JKLU, CAMPUSES } from "./config.js";
+
 export const CATEGORIES = [
   { id: "all", label: "All", emoji: "🏷️" },
   { id: "textbooks", label: "Textbooks", emoji: "📚" },
@@ -8,99 +10,92 @@ export const CATEGORIES = [
   { id: "other", label: "Other", emoji: "📦" },
 ];
 
-export const CAMPUSES = [
-  "All Campuses",
-  "North Campus",
-  "South Campus",
-  "East Campus",
-  "West Campus",
-  "Central Campus",
-];
+export { CAMPUSES };
 
 export const CONDITIONS = ["Like New", "Good", "Fair", "Used"];
 
 export const SAMPLE_LISTINGS = [
   {
     id: "1",
-    title: "Calculus Early Transcendentals — 8th Edition",
+    title: "Engineering Mathematics — Grewal",
     description:
-      "Used for MATH 101. Minimal highlighting, no torn pages. Includes solution manual PDF on request. Pick up at North Campus library.",
-    price: 45,
+      "Used for B.Tech Sem 1. Minimal highlighting. Pick up near IET block at JKLU campus.",
+    price: 350,
     category: "textbooks",
     condition: "Good",
-    campus: "North Campus",
+    campus: JKLU.campus,
     sellerName: "Priya S.",
-    sellerEmail: "priya@university.edu",
+    sellerEmail: "priya@jklu.edu.in",
     emoji: "📚",
     createdAt: Date.now() - 86400000 * 2,
   },
   {
     id: "2",
-    title: "MacBook Air M1 — 256GB, Perfect for CS Students",
+    title: "MacBook Air M1 — Perfect for CSE Students",
     description:
-      "Selling because I upgraded. Battery health 92%. Comes with charger and laptop sleeve. Can demo before purchase.",
-    price: 650,
+      "Battery health 92%. Comes with charger. Can demo at JKLU library before purchase.",
+    price: 45000,
     category: "electronics",
     condition: "Like New",
-    campus: "Central Campus",
-    sellerName: "Alex M.",
-    sellerEmail: "alex@university.edu",
+    campus: JKLU.campus,
+    sellerName: "Arjun M.",
+    sellerEmail: "arjun@jklu.edu.in",
     emoji: "💻",
     createdAt: Date.now() - 86400000 * 1,
   },
   {
     id: "3",
-    title: "IKEA Desk + Chair Set — Dorm Ready",
+    title: "Study Desk + Chair — Hostel Ready",
     description:
-      "Compact desk (120cm) with adjustable chair. Easy to disassemble for move-out. Must pick up from South dorm block B.",
-    price: 80,
+      "Compact desk with chair. Easy to disassemble. Pickup from boys hostel, JKLU.",
+    price: 2500,
     category: "furniture",
     condition: "Good",
-    campus: "South Campus",
-    sellerName: "Jordan K.",
-    sellerEmail: "jordan@university.edu",
+    campus: JKLU.campus,
+    sellerName: "Karan K.",
+    sellerEmail: "karan@jklu.edu.in",
     emoji: "🛋️",
     createdAt: Date.now() - 86400000 * 4,
   },
   {
     id: "4",
-    title: "Organic Chemistry Tutoring — ₹25/hr",
+    title: "DSA & OS Tutoring — ₹300/hr",
     description:
-      "A+ in OChem I & II. Available evenings and weekends. First 30-min session free. Zoom or in-person at East Campus study hall.",
-    price: 25,
+      "CSE 3rd year. Available evenings at JKLU campus or online. First session free.",
+    price: 300,
     category: "services",
     condition: "Like New",
-    campus: "East Campus",
+    campus: JKLU.campus,
     sellerName: "Sam R.",
-    sellerEmail: "sam@university.edu",
+    sellerEmail: "sam@jklu.edu.in",
     emoji: "🛠️",
     createdAt: Date.now() - 86400000 * 0.5,
   },
   {
     id: "5",
-    title: "University Hoodie — Size M, Navy",
+    title: "JKLU Hoodie — Size M",
     description:
-      "Official campus merch, worn twice. Too small for me now. Smoke-free dorm.",
-    price: 35,
+      "Official JKLU merch, worn twice. Smoke-free hostel room.",
+    price: 800,
     category: "clothing",
     condition: "Like New",
-    campus: "West Campus",
-    sellerName: "Taylor L.",
-    sellerEmail: "taylor@university.edu",
+    campus: JKLU.campus,
+    sellerName: "Neha L.",
+    sellerEmail: "neha@jklu.edu.in",
     emoji: "👕",
     createdAt: Date.now() - 86400000 * 3,
   },
   {
     id: "6",
-    title: "Mini Fridge — Great for Dorms",
+    title: "Mini Fridge for Hostel Room",
     description:
-      "Works perfectly. Quiet compressor. Cleaned and sanitized. You haul from 3rd floor, I'll help carry down.",
-    price: 60,
+      "Works perfectly. Quiet compressor. Pick up from JKLU girls hostel block.",
+    price: 3500,
     category: "other",
     condition: "Good",
-    campus: "North Campus",
+    campus: JKLU.campus,
     sellerName: "Chris P.",
-    sellerEmail: "chris@university.edu",
+    sellerEmail: "chris@jklu.edu.in",
     emoji: "📦",
     createdAt: Date.now() - 86400000 * 5,
   },
@@ -115,7 +110,7 @@ export function getCategoryEmoji(id) {
 }
 
 export function formatPrice(price) {
-  const formatted = price % 1 === 0 ? price : price.toFixed(2);
+  const formatted = price % 1 === 0 ? price.toLocaleString("en-IN") : price.toFixed(2);
   return `₹${formatted}`;
 }
 
