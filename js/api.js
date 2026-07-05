@@ -1,7 +1,10 @@
-const API_BASE =
-  window.location.port === "5001" || window.location.port === "5000"
-    ? ""
-    : "http://localhost:5001";
+const API_BASE = (() => {
+  const { hostname, port } = window.location;
+  if (port === "5001" || port === "5000") return "";
+  if (hostname.endsWith(".github.io")) return "https://jklu-swap.onrender.com";
+  if (hostname !== "localhost" && hostname !== "127.0.0.1") return "";
+  return "http://localhost:5001";
+})();
 
 function getToken() {
   return localStorage.getItem("campusswap_token");
