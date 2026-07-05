@@ -1,0 +1,931 @@
+import {
+  CATEGORIES,
+  CAMPUSES,
+  CONDITIONS,
+  getCategoryLabel,
+  getCategoryEmoji,
+  formatPrice,
+  timeAgo,
+} from "./data.js";
+import { api } from "./api.js";
+import {
+  getUser,
+  isLoggedIn,
+  isVerified,
+  loadSession,
+  login,
+  logout,
+  setUser,
+  requireAuth,
+} from "./auth.js";
+
+const app = document.getElementById("app");
+const toastEl = document.getElementById("toast");
+const nav = document.getElementById("main-nav");
+const menuToggle = document.getElementById("menu-toggle");
+const headerActions = document.getElementById("header-actions");
+
+let state = {
+  search: "",
+  category: "all",
+  campus: "All Campuses",
+  sort: "newest",
+};
+
+let listingsCache = [];
+let signupDraft = {};
+let cameraStream = null;
+
+function showToast(message, duration = 3000) {
+  toastEl.textContent = message;
+  toastEl.classList.add("show");
+  setTimeout(() => toastEl.classList.remove("show"), duration);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+function initials(name) {
+  return (name || "?")
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function parseRoute() {
+  const hash = location.hash.slice(1) || "/";
+  const [path, query] = hash.split("?");
+  const params = new URLSearchParams(query || "");
+  return { path, params };
+}
+
+function navigate(path) {
+  location.hash = path;
+}
+
+function setActiveNav(path) {
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    const route = link.dataset.route;
+    link.classList.toggle(
+      "active",
+      route === path || (path.startsWith("/item") && route === "/")
+    );
+  });
+}
+
+function updateHeader() {
+  const user = getUser();
+  if (!headerActions) return;
+
+  if (user) {
+    headerActions.innerHTML = `
+      <span class="header-user">${escapeHtml(user.name.split(" ")[0])}</span>
+      <button class="btn btn-outline btn-sm" id="logout-btn">Logout</button>
+    `;
+    document.getElementById("logout-btn")?.addEventListener("click", async () => {
+      await logout();
+      showToast("Logged out");
+      updateHeader();
+      render();
+    });
+  } else {
+    headerActions.innerHTML = `
+      <a href="#/login" class="btn btn-outline btn-sm">Login</a>
+      <a href="#/signup" class="btn btn-primary btn-sm">Sign Up</a>
+    `;
+  }
+}
+
+async function fetchListings() {
+  try {
+    const data = await api.getListings();
+    listingsCache = data.listings || [];
+  } catch {
+    listingsCache = [];
+    showToast("Could not load listings. Is the server running?");
+  }
+  return listingsCache;
+}
+
+function filterListings(listings) {
+  let result = [...listings];
+  if (state.category !== "all") result = result.filter((l) => l.category === state.category);
+  if (state.campus !== "All Campuses") result = result.filter((l) => l.campus === state.campus);
+  if (state.search.trim()) {
+    const q = state.search.toLowerCase();
+    result = result.filter(
+      (l) =>
+        l.title.toLowerCase().includes(q) ||
+        l.description.toLowerCase().includes(q) ||
+        (l.sellerName || "").toLowerCase().includes(q)
+    );
+  }
+  switch (state.sort) {
+    case "price-low":
+      result.sort((a, b) => a.price - b.price);
+      break;
+    case "price-high":
+      result.sort((a, b) => b.price - a.price);
+      break;
+    default:
+      result.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  return result;
+}
+
+function renderListingCard(listing, { showActions = false } = {}) {
+  const imageContent = listing.image
+    ? `<img src="${listing.image}" alt="${escapeHtml(listing.title)}" />`
+    : listing.emoji || getCategoryEmoji(listing.category);
+
+  const soldBadge = listing.status === "sold" ? `<span class="listing-badge sold">Sold</span>` : `<span class="listing-badge">${escapeHtml(listing.condition)}</span>`;
+
+  const actions = showActions
+    ? `<div class="listing-actions"><button class="btn btn-outline btn-sm" data-action="delete" data-id="${listing.id}">Delete</button></div>`
+    : "";
+
+  return `
+    <div class="listing-card-wrap">
+      <a href="#/item/${listing.id}" class="listing-card ${listing.status === "sold" ? "sold" : ""}">
+        <div class="listing-image">${imageContent}${soldBadge}</div>
+        <div class="listing-body">
+          <div class="listing-price">${formatPrice(listing.price)}${listing.category === "services" ? "/hr" : ""}</div>
+          <h3 class="listing-title">${escapeHtml(listing.title)}</h3>
+          <div class="listing-meta">
+            <span>${escapeHtml(getCategoryLabel(listing.category))}</span>
+            <span class="dot"></span>
+            <span>${escapeHtml(listing.campus)}</span>
+            <span class="dot"></span>
+            <span>${timeAgo(listing.createdAt)}</span>
+          </div>
+        </div>
+      </a>
+      ${actions}
+    </div>`;
+}
+
+function stepIndicator(current, total) {
+  return `<div class="step-indicator">${Array.from({ length: total }, (_, i) =>
+    `<span class="step-dot ${i + 1 <= current ? "active" : ""}"></span>`
+  ).join("")}</div>`;
+}
+
+function stopCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+  }
+}
+
+async function startCamera(videoEl) {
+  stopCamera();
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    videoEl.srcObject = cameraStream;
+    await videoEl.play();
+    return true;
+  } catch {
+    showToast("Camera access denied. Use file upload instead.");
+    return false;
+  }
+}
+
+function renderHome() {
+  const listings = filterListings(listingsCache);
+  const campuses = new Set(listingsCache.map((l) => l.campus)).size;
+
+  const pills = CATEGORIES.map(
+    (cat) =>
+      `<button class="pill ${state.category === cat.id ? "active" : ""}" data-category="${cat.id}">${cat.emoji} ${cat.label}</button>`
+  ).join("");
+
+  const campusOptions = CAMPUSES.map(
+    (c) => `<option value="${c}" ${state.campus === c ? "selected" : ""}>${c}</option>`
+  ).join("");
+
+  const grid =
+    listings.length > 0
+      ? `<div class="listings-grid">${listings.map((l) => renderListingCard(l)).join("")}</div>`
+      : `<div class="empty-state"><div class="emoji">🔍</div><h3>No listings found</h3><p>Try adjusting your filters or list something!</p><a href="#/sell" class="btn btn-primary">List an Item</a></div>`;
+
+  app.innerHTML = `
+    <section class="hero">
+      <div class="container hero-content">
+        <h1>Your Campus Marketplace</h1>
+        <p>Verified students only. Buy &amp; sell textbooks, electronics, furniture &amp; more on campus.</p>
+        <div class="hero-actions">
+          <a href="#/signup" class="btn btn-primary">Join CampusSwap</a>
+          <a href="#/" class="btn btn-secondary" id="browse-btn">Browse Listings</a>
+        </div>
+      </div>
+    </section>
+    <div class="container stats-bar">
+      <div class="stat-card"><strong>${listingsCache.length}</strong><span>Active Listings</span></div>
+      <div class="stat-card"><strong>${campuses}</strong><span>Campuses</span></div>
+      <div class="stat-card"><strong>✓</strong><span>ID Verified</span></div>
+    </div>
+    <section class="filters-section container">
+      <div class="filters-bar">
+        <div class="search-wrap"><span class="search-icon">🔍</span><input type="search" id="search-input" placeholder="Search listings..." value="${escapeHtml(state.search)}" /></div>
+        <select id="campus-filter">${campusOptions}</select>
+        <select id="sort-filter">
+          <option value="newest" ${state.sort === "newest" ? "selected" : ""}>Newest first</option>
+          <option value="price-low" ${state.sort === "price-low" ? "selected" : ""}>Price: Low to High</option>
+          <option value="price-high" ${state.sort === "price-high" ? "selected" : ""}>Price: High to Low</option>
+        </select>
+      </div>
+      <div class="category-pills">${pills}</div>
+    </section>
+    <section class="container"><h2 class="section-title">${listings.length} listing${listings.length !== 1 ? "s" : ""}</h2>${grid}</section>`;
+
+  bindFilterEvents();
+  document.getElementById("browse-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.querySelector(".filters-section")?.scrollIntoView({ behavior: "smooth" });
+  });
+}
+
+function bindFilterEvents() {
+  document.getElementById("search-input")?.addEventListener("input", (e) => {
+    state.search = e.target.value;
+    render();
+  });
+  document.getElementById("campus-filter")?.addEventListener("change", (e) => {
+    state.campus = e.target.value;
+    render();
+  });
+  document.getElementById("sort-filter")?.addEventListener("change", (e) => {
+    state.sort = e.target.value;
+    render();
+  });
+  document.querySelectorAll("[data-category]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.category = btn.dataset.category;
+      render();
+    });
+  });
+}
+
+function renderSignup(step = 1) {
+  stopCamera();
+  const campusOptions = CAMPUSES.filter((c) => c !== "All Campuses")
+    .map((c) => `<option value="${c}" ${signupDraft.campus === c ? "selected" : ""}>${c}</option>`)
+    .join("");
+
+  let content = "";
+
+  if (step === 1) {
+    content = `
+      ${stepIndicator(1, 3)}
+      <h2>Student Details</h2>
+      <p class="form-subtitle">Enter your name, roll number, and phone for easy access.</p>
+      <form id="signup-step1">
+        <div class="form-group"><label for="name">Full Name</label><input class="input" id="name" required placeholder="e.g. Rahul Sharma" value="${escapeHtml(signupDraft.name || "")}" /></div>
+        <div class="form-row">
+          <div class="form-group"><label for="rollNumber">Roll Number</label><input class="input" id="rollNumber" required placeholder="e.g. 21CSE1042" value="${escapeHtml(signupDraft.rollNumber || "")}" /></div>
+          <div class="form-group"><label for="phone">Phone Number</label><input class="input" id="phone" type="tel" required pattern="[0-9]{10}" placeholder="10-digit mobile" value="${escapeHtml(signupDraft.phone || "")}" /></div>
+        </div>
+        <div class="form-group"><label for="collegeEmail">College Email</label><input class="input" id="collegeEmail" type="email" required placeholder="you@college.edu or you@college.ac.in" value="${escapeHtml(signupDraft.collegeEmail || "")}" /><p class="hint">Must be your official college email (.edu or .ac.in)</p></div>
+        <div class="form-group"><label for="campus">Campus</label><select id="campus">${campusOptions}</select></div>
+        <button type="submit" class="btn btn-accent btn-block">Continue →</button>
+      </form>`;
+  } else if (step === 2) {
+    content = `
+      ${stepIndicator(2, 3)}
+      <h2>College ID Verification</h2>
+      <p class="form-subtitle">Take a clear photo of your college identity card. This keeps our marketplace safe for students.</p>
+      <div class="id-capture-area">
+        <video id="id-video" class="id-video" playsinline autoplay muted></video>
+        <canvas id="id-canvas" class="hidden"></canvas>
+        <div class="id-preview" id="id-preview">${signupDraft.idPreview ? `<img src="${signupDraft.idPreview}" alt="ID preview" />` : '<span class="id-placeholder">📸 No photo yet</span>'}</div>
+      </div>
+      <div class="id-actions">
+        <button type="button" class="btn btn-outline" id="start-camera">Open Camera</button>
+        <button type="button" class="btn btn-primary" id="capture-photo">Capture Photo</button>
+        <label class="btn btn-outline" for="id-upload">Upload File<input type="file" id="id-upload" accept="image/*" capture="environment" hidden /></label>
+      </div>
+      <div class="form-actions-row">
+        <button type="button" class="btn btn-outline" id="back-step1">← Back</button>
+        <button type="button" class="btn btn-accent" id="to-step3" ${signupDraft.idFile || signupDraft.idPreview ? "" : "disabled"}>Continue →</button>
+      </div>`;
+  } else {
+    content = `
+      ${stepIndicator(3, 3)}
+      <h2>Verify College Email</h2>
+      <p class="form-subtitle">We sent a 6-digit code to <strong>${escapeHtml(signupDraft.collegeEmail || "")}</strong></p>
+      <div class="verify-notice" id="demo-otp-notice"></div>
+      <form id="signup-verify">
+        <div class="form-group"><label for="otp">Verification Code</label><input class="input otp-input" id="otp" required maxlength="6" pattern="[0-9]{6}" placeholder="000000" inputmode="numeric" /></div>
+        <button type="submit" class="btn btn-accent btn-block">Verify &amp; Create Account</button>
+      </form>
+      <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>
+      <button type="button" class="btn btn-ghost btn-block" id="back-step2">← Back</button>`;
+  }
+
+  app.innerHTML = `
+    <div class="container auth-page">
+      <div class="auth-card wide">${content}
+        <p class="auth-footer">Already have an account? <a href="#/login">Log in</a></p>
+      </div>
+    </div>`;
+
+  if (step === 1) {
+    document.getElementById("signup-step1")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      signupDraft = {
+        ...signupDraft,
+        name: document.getElementById("name").value.trim(),
+        rollNumber: document.getElementById("rollNumber").value.trim().toUpperCase(),
+        phone: document.getElementById("phone").value.trim(),
+        collegeEmail: document.getElementById("collegeEmail").value.trim().toLowerCase(),
+        campus: document.getElementById("campus").value,
+      };
+      renderSignup(2);
+    });
+  }
+
+  if (step === 2) {
+    const preview = document.getElementById("id-preview");
+    const video = document.getElementById("id-video");
+    const canvas = document.getElementById("id-canvas");
+    const toStep3 = document.getElementById("to-step3");
+
+    document.getElementById("start-camera")?.addEventListener("click", () => startCamera(video));
+    document.getElementById("capture-photo")?.addEventListener("click", () => {
+      if (!cameraStream) {
+        showToast("Open camera first or upload a file.");
+        return;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        signupDraft.idFile = new File([blob], "id-card.jpg", { type: "image/jpeg" });
+        signupDraft.idPreview = canvas.toDataURL("image/jpeg");
+        preview.innerHTML = `<img src="${signupDraft.idPreview}" alt="ID preview" />`;
+        toStep3.disabled = false;
+        stopCamera();
+        showToast("ID photo captured!");
+      }, "image/jpeg", 0.85);
+    });
+
+    document.getElementById("id-upload")?.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      signupDraft.idFile = file;
+      const reader = new FileReader();
+      reader.onload = () => {
+        signupDraft.idPreview = reader.result;
+        preview.innerHTML = `<img src="${reader.result}" alt="ID preview" />`;
+        toStep3.disabled = false;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById("back-step1")?.addEventListener("click", () => renderSignup(1));
+    document.getElementById("to-step3")?.addEventListener("click", async () => {
+      try {
+        const formData = new FormData();
+        formData.append("name", signupDraft.name);
+        formData.append("rollNumber", signupDraft.rollNumber);
+        formData.append("phone", signupDraft.phone);
+        formData.append("collegeEmail", signupDraft.collegeEmail);
+        formData.append("campus", signupDraft.campus);
+        formData.append("idCard", signupDraft.idFile);
+
+        const data = await api.signup(formData);
+        api.setToken(data.token);
+        setUser(data.user);
+        signupDraft.demoOtp = data.demoOtp;
+        updateHeader();
+        renderSignup(3);
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  }
+
+  if (step === 3) {
+    const notice = document.getElementById("demo-otp-notice");
+    if (signupDraft.demoOtp) {
+      notice.innerHTML = `<div class="demo-otp">Demo mode — your code is: <strong>${signupDraft.demoOtp}</strong></div>`;
+    }
+
+    document.getElementById("signup-verify")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const data = await api.verifyEmail(signupDraft.collegeEmail, document.getElementById("otp").value.trim());
+        setUser(data.user);
+        showToast("Welcome to CampusSwap!");
+        navigate("#/");
+        render();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    document.getElementById("resend-otp")?.addEventListener("click", async () => {
+      try {
+        const data = await api.sendOtp(signupDraft.collegeEmail);
+        if (data.demoOtp) {
+          signupDraft.demoOtp = data.demoOtp;
+          notice.innerHTML = `<div class="demo-otp">Demo mode — your code is: <strong>${data.demoOtp}</strong></div>`;
+        }
+        showToast("New code sent!");
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+
+    document.getElementById("back-step2")?.addEventListener("click", () => renderSignup(2));
+  }
+}
+
+function renderLogin() {
+  app.innerHTML = `
+    <div class="container auth-page">
+      <div class="auth-card">
+        <h2>Welcome Back</h2>
+        <p class="form-subtitle">Log in with your college email and roll number.</p>
+        <form id="login-form">
+          <div class="form-group"><label for="login-email">College Email</label><input class="input" id="login-email" type="email" required placeholder="you@college.edu" /></div>
+          <div class="form-group"><label for="login-roll">Roll Number</label><input class="input" id="login-roll" required placeholder="e.g. 21CSE1042" /></div>
+          <button type="submit" class="btn btn-accent btn-block">Log In</button>
+        </form>
+        <p class="auth-footer">New here? <a href="#/signup">Create an account</a></p>
+      </div>
+    </div>`;
+
+  document.getElementById("login-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await login(
+        document.getElementById("login-email").value.trim().toLowerCase(),
+        document.getElementById("login-roll").value.trim().toUpperCase()
+      );
+      updateHeader();
+      showToast("Logged in!");
+      if (!isVerified()) {
+        signupDraft.collegeEmail = getUser().collegeEmail;
+        navigate("#/verify");
+      } else {
+        navigate("#/");
+      }
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+function renderVerify() {
+  const user = getUser();
+  if (!user) {
+    navigate("#/login");
+    render();
+    return;
+  }
+  signupDraft.collegeEmail = user.collegeEmail;
+
+  app.innerHTML = `
+    <div class="container auth-page">
+      <div class="auth-card">
+        <h2>Verify Your Email</h2>
+        <p class="form-subtitle">Enter the code sent to <strong>${escapeHtml(user.collegeEmail)}</strong></p>
+        <div class="verify-notice" id="demo-otp-notice"></div>
+        <form id="verify-form">
+          <div class="form-group"><label for="otp">Verification Code</label><input class="input otp-input" id="otp" required maxlength="6" placeholder="000000" inputmode="numeric" /></div>
+          <button type="submit" class="btn btn-accent btn-block">Verify Email</button>
+        </form>
+        <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>
+      </div>
+    </div>`;
+
+  document.getElementById("verify-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const data = await api.verifyEmail(user.collegeEmail, document.getElementById("otp").value.trim());
+      setUser(data.user);
+      showToast("Email verified!");
+      navigate("#/");
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("resend-otp")?.addEventListener("click", async () => {
+    try {
+      const data = await api.sendOtp(user.collegeEmail);
+      if (data.demoOtp) {
+        document.getElementById("demo-otp-notice").innerHTML =
+          `<div class="demo-otp">Demo mode — your code is: <strong>${data.demoOtp}</strong></div>`;
+      }
+      showToast("Code sent!");
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+async function renderDetail(id) {
+  let listing;
+  try {
+    const data = await api.getListing(id);
+    listing = data.listing;
+  } catch {
+    listing = listingsCache.find((l) => l.id === id);
+  }
+
+  if (!listing) {
+    app.innerHTML = `<div class="container detail-page"><div class="empty-state"><div class="emoji">😕</div><h3>Listing not found</h3><a href="#/" class="btn btn-primary">Back to Browse</a></div></div>`;
+    return;
+  }
+
+  const user = getUser();
+  const isOwner = user && listing.sellerId === user.id;
+  const isSold = listing.status === "sold";
+  const imageContent = listing.image ? `<img src="${listing.image}" alt="" />` : listing.emoji || getCategoryEmoji(listing.category);
+  const priceSuffix = listing.category === "services" ? "/hr" : "";
+
+  let actions = "";
+  if (isSold) {
+    actions = `<span class="sold-label">This item has been sold</span>`;
+  } else if (isOwner) {
+    actions = `<span class="owner-label">This is your listing</span>`;
+  } else if (user && isVerified()) {
+    actions = `
+      <button class="btn btn-accent" id="message-btn">Message Seller</button>
+      <a href="#/checkout/${listing.id}" class="btn btn-primary">Buy Now — ${formatPrice(listing.price)}</a>
+      <button class="btn btn-outline" id="share-btn">Share</button>`;
+  } else {
+    actions = `<a href="#/login" class="btn btn-accent">Log in to Buy or Message</a>`;
+  }
+
+  app.innerHTML = `
+    <div class="container detail-page">
+      <a href="#/" class="back-link">← Back to listings</a>
+      <div class="detail-grid">
+        <div class="detail-image">${imageContent}</div>
+        <div class="detail-info">
+          <div class="detail-tags">
+            <span class="tag">${escapeHtml(getCategoryLabel(listing.category))}</span>
+            <span class="tag">${escapeHtml(listing.condition)}</span>
+            <span class="tag">${escapeHtml(listing.campus)}</span>
+            ${listing.sellerRollNumber ? `<span class="tag verified">✓ Verified Student</span>` : ""}
+          </div>
+          <h1>${escapeHtml(listing.title)}</h1>
+          <div class="detail-price">${formatPrice(listing.price)}${priceSuffix}</div>
+          <p class="detail-desc">${escapeHtml(listing.description)}</p>
+          <div class="seller-card">
+            <h4>Seller</h4>
+            <div class="seller-row">
+              <div class="seller-avatar">${initials(listing.sellerName)}</div>
+              <div>
+                <div class="seller-name">${escapeHtml(listing.sellerName)}</div>
+                <div class="seller-campus">${escapeHtml(listing.campus)} · Roll: ${escapeHtml(listing.sellerRollNumber || "—")}</div>
+                ${user && isVerified() ? `<div class="seller-contact">📞 ${escapeHtml(listing.sellerPhone || "—")}</div>` : ""}
+              </div>
+            </div>
+          </div>
+          <div class="detail-actions">${actions}</div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("message-btn")?.addEventListener("click", async () => {
+    try {
+      const data = await api.startConversation(listing.id);
+      navigate(`#/messages/${data.conversationId}`);
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+
+  document.getElementById("share-btn")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      showToast("Link copied!");
+    } catch {
+      showToast("Could not copy link");
+    }
+  });
+}
+
+function renderSell() {
+  if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/signup"))) {
+    app.innerHTML = `<div class="container auth-page"><div class="auth-card"><h2>Sign up required</h2><p class="form-subtitle">Create a verified student account to sell items.</p><a href="#/signup" class="btn btn-accent btn-block">Sign Up</a></div></div>`;
+    return;
+  }
+
+  const user = getUser();
+  const categoryOptions = CATEGORIES.filter((c) => c.id !== "all")
+    .map((c) => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join("");
+  const campusOptions = CAMPUSES.filter((c) => c !== "All Campuses")
+    .map((c) => `<option value="${c}" ${user.campus === c ? "selected" : ""}>${c}</option>`).join("");
+  const conditionOptions = CONDITIONS.map((c) => `<option value="${c}">${c}</option>`).join("");
+
+  app.innerHTML = `
+    <div class="container">
+      <div class="page-header"><h1>List an Item</h1><p>Selling as <strong>${escapeHtml(user.name)}</strong> (${escapeHtml(user.rollNumber)})</p></div>
+      <form class="form-card" id="sell-form">
+        <div class="form-group"><label for="title">Title</label><input class="input" id="title" required maxlength="100" placeholder="e.g. Calculus Textbook — 8th Edition" /></div>
+        <div class="form-row">
+          <div class="form-group"><label for="price">Price (₹)</label><input class="input" id="price" type="number" required min="0" step="1" placeholder="0" /></div>
+          <div class="form-group"><label for="category">Category</label><select id="category" required>${categoryOptions}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="condition">Condition</label><select id="condition" required>${conditionOptions}</select></div>
+          <div class="form-group"><label for="campus">Campus</label><select id="campus" required>${campusOptions}</select></div>
+        </div>
+        <div class="form-group"><label for="description">Description</label><textarea class="input" id="description" required maxlength="500" placeholder="Condition, pickup location, etc."></textarea></div>
+        <div class="form-group"><label for="image">Photo (optional)</label><input class="input" id="image" type="file" accept="image/*" /><div class="image-preview" id="image-preview"></div></div>
+        <button type="submit" class="btn btn-accent btn-block">Publish Listing</button>
+      </form>
+    </div>`;
+
+  let imageData = null;
+  document.getElementById("image")?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    const preview = document.getElementById("image-preview");
+    if (!file) { imageData = null; preview.classList.remove("visible"); preview.innerHTML = ""; return; }
+    const reader = new FileReader();
+    reader.onload = () => { imageData = reader.result; preview.classList.add("visible"); preview.innerHTML = `<img src="${imageData}" alt="Preview" />`; };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById("sell-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const category = document.getElementById("category").value;
+      const data = await api.createListing({
+        title: document.getElementById("title").value.trim(),
+        description: document.getElementById("description").value.trim(),
+        price: parseFloat(document.getElementById("price").value),
+        category,
+        condition: document.getElementById("condition").value,
+        campus: document.getElementById("campus").value,
+        emoji: getCategoryEmoji(category),
+        image: imageData,
+      });
+      await fetchListings();
+      showToast("Listing published!");
+      navigate(`#/item/${data.listing.id}`);
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+function renderProfile() {
+  if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) {
+    renderLogin();
+    return;
+  }
+
+  const user = getUser();
+  const myListings = listingsCache.filter((l) => l.sellerId === user.id);
+  const listingsGrid = myListings.length
+    ? `<div class="listings-grid">${myListings.map((l) => renderListingCard(l, { showActions: true })).join("")}</div>`
+    : `<div class="empty-state"><div class="emoji">📭</div><h3>No listings yet</h3><a href="#/sell" class="btn btn-primary">List Your First Item</a></div>`;
+
+  app.innerHTML = `
+    <div class="container">
+      <div class="page-header"><h1>Your Profile</h1><p>Verified campus student account</p></div>
+      <div class="profile-grid">
+        <aside class="profile-sidebar">
+          <div class="profile-avatar-lg">${initials(user.name)}</div>
+          <h2>${escapeHtml(user.name)}</h2>
+          <p class="campus-label">${escapeHtml(user.collegeEmail)}</p>
+          <p class="campus-label">Roll: ${escapeHtml(user.rollNumber)}</p>
+          <p class="campus-label">📞 ${escapeHtml(user.phone)}</p>
+          <p class="campus-label">${escapeHtml(user.campus)}</p>
+          <div class="verify-badges">
+            ${user.emailVerified ? '<span class="badge badge-green">✓ Email Verified</span>' : ""}
+            ${user.idVerified ? '<span class="badge badge-green">✓ ID Verified</span>' : ""}
+          </div>
+          <div class="profile-stats">
+            <div class="profile-stat"><strong>${myListings.length}</strong><span>My Listings</span></div>
+            <div class="profile-stat"><strong>${listingsCache.length}</strong><span>Total on Site</span></div>
+          </div>
+        </aside>
+        <div><h2 class="section-title">My Listings</h2><div class="my-listings">${listingsGrid}</div></div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll("[data-action='delete']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this listing?")) return;
+      try {
+        await api.deleteListing(btn.dataset.id);
+        await fetchListings();
+        showToast("Listing deleted");
+        render();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+}
+
+async function renderMessages(conversationId) {
+  if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) return;
+
+  let conversations = [];
+  try {
+    const data = await api.getConversations();
+    conversations = data.conversations || [];
+  } catch (err) {
+    showToast(err.message);
+  }
+
+  let messagesHtml = "";
+  let activeConv = null;
+
+  if (conversationId) {
+    try {
+      const data = await api.getMessages(conversationId);
+      activeConv = conversations.find((c) => c.id === parseInt(conversationId, 10));
+      messagesHtml = (data.messages || [])
+        .map(
+          (m) =>
+            `<div class="chat-bubble ${m.isMine ? "mine" : "theirs"}"><div class="bubble-body">${escapeHtml(m.body)}</div><div class="bubble-time">${timeAgo(m.createdAt)}</div></div>`
+        )
+        .join("");
+    } catch (err) {
+      messagesHtml = `<p class="chat-empty">${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  const convList = conversations.length
+    ? conversations
+        .map(
+          (c) =>
+            `<a href="#/messages/${c.id}" class="conv-item ${c.id === parseInt(conversationId, 10) ? "active" : ""}"><strong>${escapeHtml(c.listingTitle)}</strong><span>${escapeHtml(c.otherName)}</span><p>${escapeHtml(c.lastMessage)}</p></a>`
+        )
+        .join("")
+    : `<p class="chat-empty">No conversations yet. Message a seller from a listing page.</p>`;
+
+  app.innerHTML = `
+    <div class="container messages-page">
+      <div class="page-header"><h1>Messages</h1><p>Chat with buyers and sellers on campus</p></div>
+      <div class="messages-layout">
+        <aside class="conv-list">${convList}</aside>
+        <section class="chat-panel">
+          ${conversationId && activeConv ? `
+            <div class="chat-header"><strong>${escapeHtml(activeConv.listingTitle)}</strong><span>with ${escapeHtml(activeConv.otherName)} · ${formatPrice(activeConv.listingPrice)}</span></div>
+            <div class="chat-messages" id="chat-messages">${messagesHtml || '<p class="chat-empty">Start the conversation!</p>'}</div>
+            <form class="chat-input-row" id="chat-form"><input class="input" id="chat-body" placeholder="Type a message..." required autocomplete="off" /><button type="submit" class="btn btn-accent">Send</button></form>
+          ` : `<div class="chat-placeholder"><div class="emoji">💬</div><p>Select a conversation or message a seller from a listing.</p></div>`}
+        </section>
+      </div>
+    </div>`;
+
+  const chatMessages = document.getElementById("chat-messages");
+  if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  document.getElementById("chat-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("chat-body");
+    const body = input.value.trim();
+    if (!body) return;
+    try {
+      await api.sendMessage(conversationId, body);
+      input.value = "";
+      renderMessages(conversationId);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+async function renderCheckout(listingId) {
+  if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) return;
+
+  let listing;
+  try {
+    const data = await api.getListing(listingId);
+    listing = data.listing;
+  } catch {
+    showToast("Listing not found");
+    navigate("#/");
+    render();
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="container checkout-page">
+      <div class="page-header"><h1>Checkout</h1><p>Secure campus payment</p></div>
+      <div class="checkout-grid">
+        <div class="checkout-summary form-card">
+          <h3>Order Summary</h3>
+          <div class="checkout-item"><span>${escapeHtml(listing.title)}</span><strong>${formatPrice(listing.price)}</strong></div>
+          <div class="checkout-item"><span>Platform fee</span><strong>₹0</strong></div>
+          <div class="checkout-total"><span>Total</span><strong>${formatPrice(listing.price)}</strong></div>
+          <p class="hint">Meet on campus to collect your item after payment.</p>
+        </div>
+        <form class="form-card" id="payment-form">
+          <h3>Payment Details</h3>
+          <p class="form-subtitle">Demo payment — no real charges.</p>
+          <div class="form-group"><label>Card Number</label><input class="input" required placeholder="4242 4242 4242 4242" maxlength="19" /></div>
+          <div class="form-row">
+            <div class="form-group"><label>Expiry</label><input class="input" required placeholder="MM/YY" maxlength="5" /></div>
+            <div class="form-group"><label>CVV</label><input class="input" required placeholder="123" maxlength="3" type="password" /></div>
+          </div>
+          <div class="form-group"><label>Name on Card</label><input class="input" required placeholder="As on card" /></div>
+          <button type="submit" class="btn btn-accent btn-block">Pay ${formatPrice(listing.price)}</button>
+          <a href="#/item/${listing.id}" class="btn btn-ghost btn-block">Cancel</a>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("payment-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api.createPayment(listingId);
+      await fetchListings();
+      showToast("Payment successful! Message the seller to arrange pickup.");
+      navigate("#/messages");
+      render();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+async function render() {
+  stopCamera();
+  const { path } = parseRoute();
+
+  if (path.startsWith("/item/")) {
+    setActiveNav("/");
+    await renderDetail(path.split("/item/")[1]);
+    return;
+  }
+  if (path.startsWith("/messages")) {
+    setActiveNav("/messages");
+    const convId = path.split("/messages/")[1] || null;
+    await renderMessages(convId);
+    return;
+  }
+  if (path.startsWith("/checkout/")) {
+    setActiveNav("/");
+    await renderCheckout(path.split("/checkout/")[1]);
+    return;
+  }
+
+  switch (path) {
+    case "/signup":
+      setActiveNav("");
+      renderSignup(1);
+      break;
+    case "/login":
+      setActiveNav("");
+      renderLogin();
+      break;
+    case "/verify":
+      setActiveNav("");
+      renderVerify();
+      break;
+    case "/sell":
+      setActiveNav("/sell");
+      renderSell();
+      break;
+    case "/profile":
+      setActiveNav("/profile");
+      await fetchListings();
+      renderProfile();
+      break;
+    case "/messages":
+      setActiveNav("/messages");
+      await renderMessages(null);
+      break;
+    default:
+      setActiveNav("/");
+      await fetchListings();
+      renderHome();
+  }
+}
+
+menuToggle?.addEventListener("click", () => nav.classList.toggle("open"));
+nav?.addEventListener("click", () => nav.classList.remove("open"));
+window.addEventListener("hashchange", render);
+
+async function init() {
+  await loadSession();
+  updateHeader();
+  render();
+}
+
+init();

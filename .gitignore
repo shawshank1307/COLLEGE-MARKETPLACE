@@ -1,0 +1,17 @@
+# Python
+backend/venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local data
+backend/campus_market.db
+backend/uploads/id_cards/*
+!backend/uploads/id_cards/.gitkeep
+
+# OS
+.DS_Store
+
+# Environment
+.env
+.env.local

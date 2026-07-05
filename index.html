@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CampusSwap — Student Marketplace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="#/" class="logo">
+        <span class="logo-icon">🎓</span>
+        <span class="logo-text">CampusSwap</span>
+      </a>
+      <nav class="nav" id="main-nav">
+        <a href="#/" class="nav-link active" data-route="/">Browse</a>
+        <a href="#/sell" class="nav-link" data-route="/sell">Sell Item</a>
+        <a href="#/messages" class="nav-link" data-route="/messages">Messages</a>
+        <a href="#/profile" class="nav-link" data-route="/profile">Profile</a>
+      </nav>
+      <div class="header-actions" id="header-actions"></div>
+      <button class="menu-toggle" id="menu-toggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon">🎓</span>
+        <strong>CampusSwap</strong>
+        <p>Buy &amp; sell safely within your campus community.</p>
+      </div>
+      <div class="footer-links">
+        <a href="#/">Browse</a>
+        <a href="#/messages">Messages</a>
+        <a href="#/sell">Sell</a>
+        <a href="#/profile">Profile</a>
+      </div>
+    </div>
+    <div class="footer-bottom container">
+      <p>&copy; 2026 CampusSwap. Built for students, by students.</p>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
