@@ -1,6 +1,9 @@
 #!/bin/sh
-# Strip Cursor agent attribution from commit messages
-sed -i '' '/^Co-authored-by: Cursor <cursoragent@cursor.com>$/d' "$1" 2>/dev/null || \
-sed -i '/^Co-authored-by: Cursor <cursoragent@cursor.com>$/d' "$1" 2>/dev/null || true
-sed -i '' '/^Made-with: Cursor$/d' "$1" 2>/dev/null || \
-sed -i '/^Made-with: Cursor$/d' "$1" 2>/dev/null || true
+# Strip unwanted co-author attribution from commit messages
+for pattern in \
+  '^Co-authored-by: Cursor <cursoragent@cursor.com>$' \
+  '^Co-authored-by: nayan9617 <184171760+nayan9617@users.noreply.github.com>$' \
+  '^Made-with: Cursor$'
+do
+  sed -i '' "/${pattern}/d" "$1" 2>/dev/null || sed -i "/${pattern}/d" "$1" 2>/dev/null || true
+done

@@ -1,3 +1,9 @@
+databases:
+  - name: jklu-swap-db
+    plan: free
+    databaseName: jklu_swap
+    user: jklu_swap
+
 services:
   - type: web
     name: jklu-swap
@@ -10,3 +16,23 @@ services:
         value: "0"
       - key: PYTHON_VERSION
         value: "3.12.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jklu-swap-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "1"
+      - key: ALLOWED_ORIGINS
+        value: "https://shawshank1307.github.io"

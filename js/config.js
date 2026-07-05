@@ -39,6 +39,9 @@ export const CAMPUS_PHOTOS = [
 
 export const CAMPUSES = [JKLU.campus];
 
+/** Live backend API — update after deploying to Render */
+export const PRODUCTION_API_URL = "https://jklu-swap.onrender.com";
+
 export function photoUrl(photo) {
   if (window.matchMedia("(max-width: 768px)").matches && photo.srcMd) {
     return photo.srcMd;

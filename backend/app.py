@@ -3,27 +3,38 @@ import os
 import random
 import re
 import secrets
-import sqlite3
 import time
 from functools import wraps
+from io import BytesIO
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 
-BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "uploads" / "id_cards"
-DB_PATH = BASE_DIR / "campus_market.db"
-DEBUG = os.environ.get("FLASK_DEBUG", "1") == "1"
+from database import BASE_DIR, UPLOAD_DIR, connect, init_schema, use_postgres
+from mail import send_otp_email, smtp_configured
 
-app = Flask(__name__)
-CORS(app, supports_credentials=True, origins=[
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+DEBUG = os.environ.get("FLASK_DEBUG", "1") == "1"
+APP_SECRET = os.environ.get("SECRET_KEY", "dev-only-change-in-production")
+DEFAULT_ORIGINS = [
     "https://shawshank1307.github.io",
+    "https://jklu-swap.onrender.com",
     "http://localhost:5001",
     "http://127.0.0.1:5001",
     "http://localhost:5000",
     "http://127.0.0.1:5000",
-])
+]
+extra_origins = [
+    o.strip()
+    for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = APP_SECRET
+CORS(app, supports_credentials=True, origins=DEFAULT_ORIGINS + extra_origins)
 
 COLLEGE_EMAIL_RE = re.compile(
     r"^[a-zA-Z0-9._%+-]+@(?!gmail\.com|yahoo\.com|hotmail\.com|outlook\.com)"
@@ -34,8 +45,7 @@ COLLEGE_EMAIL_RE = re.compile(
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
+        g.db = connect()
     return g.db
 
 
@@ -47,96 +57,15 @@ def close_db(_exc):
 
 
 def init_db():
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            roll_number TEXT NOT NULL UNIQUE,
-            phone TEXT NOT NULL,
-            college_email TEXT NOT NULL UNIQUE,
-            campus TEXT NOT NULL DEFAULT 'JKLU Campus',
-            id_card_path TEXT NOT NULL,
-            email_verified INTEGER NOT NULL DEFAULT 0,
-            id_verified INTEGER NOT NULL DEFAULT 0,
-            created_at REAL NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            created_at REAL NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS otp_codes (
-            college_email TEXT PRIMARY KEY,
-            code TEXT NOT NULL,
-            expires_at REAL NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS listings (
-            id TEXT PRIMARY KEY,
-            seller_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            price REAL NOT NULL,
-            category TEXT NOT NULL,
-            condition TEXT NOT NULL,
-            campus TEXT NOT NULL,
-            emoji TEXT,
-            image TEXT,
-            status TEXT NOT NULL DEFAULT 'active',
-            created_at REAL NOT NULL,
-            FOREIGN KEY (seller_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            listing_id TEXT NOT NULL,
-            buyer_id INTEGER NOT NULL,
-            seller_id INTEGER NOT NULL,
-            created_at REAL NOT NULL,
-            UNIQUE(listing_id, buyer_id),
-            FOREIGN KEY (listing_id) REFERENCES listings(id),
-            FOREIGN KEY (buyer_id) REFERENCES users(id),
-            FOREIGN KEY (seller_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER NOT NULL,
-            sender_id INTEGER NOT NULL,
-            body TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-            FOREIGN KEY (sender_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS transactions (
-            id TEXT PRIMARY KEY,
-            listing_id TEXT NOT NULL,
-            buyer_id INTEGER NOT NULL,
-            seller_id INTEGER NOT NULL,
-            amount REAL NOT NULL,
-            status TEXT NOT NULL DEFAULT 'completed',
-            created_at REAL NOT NULL,
-            FOREIGN KEY (listing_id) REFERENCES listings(id),
-            FOREIGN KEY (buyer_id) REFERENCES users(id),
-            FOREIGN KEY (seller_id) REFERENCES users(id)
-        );
-        """
-    )
-
-    count = db.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
-    if count == 0:
-        seed_listings(db)
-
-    db.commit()
-    db.close()
+    db = connect()
+    try:
+        init_schema(db)
+        count = db.fetchone(db.execute("SELECT COUNT(*) AS c FROM listings"))
+        if count and count["c"] == 0:
+            seed_listings(db)
+        db.commit()
+    finally:
+        db.close()
 
 
 def seed_listings(db):
@@ -149,24 +78,40 @@ def seed_listings(db):
         ("5", "JKLU Hoodie — Size M", "Official JKLU merch, worn twice.", 800, "clothing", "Like New", "JKLU Campus", "👕", now - 259200),
         ("6", "Mini Fridge for Hostel Room", "Works perfectly. Quiet compressor.", 3500, "other", "Good", "JKLU Campus", "📦", now - 432000),
     ]
-    db.execute(
-        """
-        INSERT INTO users (name, roll_number, phone, college_email, campus, id_card_path, email_verified, id_verified, created_at)
-        VALUES ('Demo Seller', 'DEMO001', '9999999999', 'demo@jklu.edu.in', 'JKLU Campus', 'seed', 1, 1, ?)
-        ON CONFLICT(college_email) DO NOTHING
-        """,
-        (now,),
+
+    if db.is_postgres:
+        db.execute(
+            """
+            INSERT INTO users (name, roll_number, phone, college_email, campus, id_card_path, email_verified, id_verified, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s)
+            ON CONFLICT (college_email) DO NOTHING
+            """,
+            ("Demo Seller", "DEMO001", "9999999999", "demo@jklu.edu.in", "JKLU Campus", "seed", now),
+        )
+    else:
+        db.execute(
+            """
+            INSERT OR IGNORE INTO users (name, roll_number, phone, college_email, campus, id_card_path, email_verified, id_verified, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s)
+            """,
+            ("Demo Seller", "DEMO001", "9999999999", "demo@jklu.edu.in", "JKLU Campus", "seed", now),
+        )
+
+    seller = db.fetchone(
+        db.execute("SELECT id FROM users WHERE college_email = %s", ("demo@jklu.edu.in",))
     )
-    seller = db.execute("SELECT id FROM users WHERE college_email = 'demo@jklu.edu.in'").fetchone()
-    if seller:
-        for row in samples:
-            db.execute(
-                """
-                INSERT INTO listings (id, seller_id, title, description, price, category, condition, campus, emoji, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-                """,
-                (row[0], seller["id"], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]),
-            )
+    if not seller:
+        return
+
+    for row in samples:
+        db.execute(
+            """
+            INSERT INTO listings (id, seller_id, title, description, price, category, condition, campus, emoji, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (row[0], seller["id"], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]),
+        )
 
 
 def user_to_dict(row):
@@ -217,15 +162,16 @@ def get_current_user():
     token = get_token()
     if not token:
         return None
-    row = get_db().execute(
-        """
-        SELECT u.* FROM users u
-        JOIN sessions s ON s.user_id = u.id
-        WHERE s.token = ?
-        """,
-        (token,),
-    ).fetchone()
-    return row
+    return get_db().fetchone(
+        get_db().execute(
+            """
+            SELECT u.* FROM users u
+            JOIN sessions s ON s.user_id = u.id
+            WHERE s.token = %s
+            """,
+            (token,),
+        )
+    )
 
 
 def require_auth(f):
@@ -249,9 +195,46 @@ def generate_otp():
     return f"{random.randint(100000, 999999)}"
 
 
+def deliver_otp(college_email, otp):
+    if smtp_configured():
+        send_otp_email(college_email, otp)
+        return {"sent": True, "demoOtp": None}
+
+    print(f"\n[JKLU Swap OTP] {college_email} -> {otp}\n")
+    if DEBUG:
+        return {"sent": False, "demoOtp": otp}
+    raise RuntimeError(
+        "Email delivery is not configured. Set SMTP_HOST and SMTP_FROM on the server."
+    )
+
+
+def save_id_card(id_card, college_email):
+    ext = Path(id_card.filename).suffix.lower() or ".jpg"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("ID card must be JPG, PNG, or WEBP.")
+
+    file_bytes = id_card.read()
+    if len(file_bytes) > 5 * 1024 * 1024:
+        raise ValueError("ID card image must be under 5 MB.")
+
+    file_hash = hashlib.sha256(f"{college_email}{time.time()}".encode()).hexdigest()[:16]
+    filename = f"{file_hash}{ext}"
+
+    try:
+        (UPLOAD_DIR / filename).write_bytes(file_bytes)
+    except OSError:
+        pass
+
+    return filename, file_bytes
+
+
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({
+        "status": "ok",
+        "database": "postgresql" if use_postgres() else "sqlite",
+        "email": "smtp" if smtp_configured() else "demo",
+    })
 
 
 @app.route("/api/auth/signup", methods=["POST"])
@@ -265,67 +248,78 @@ def signup():
 
     if not all([name, roll_number, phone, college_email, campus]):
         return jsonify({"error": "All fields are required."}), 400
-
     if not validate_college_email(college_email):
         return jsonify({"error": "Use a valid college email (.edu or .ac.in)."}), 400
-
     if not re.fullmatch(r"\d{10}", phone):
         return jsonify({"error": "Phone number must be 10 digits."}), 400
-
     if not id_card or not id_card.filename:
         return jsonify({"error": "College ID card photo is required."}), 400
 
     db = get_db()
-    existing = db.execute(
-        "SELECT college_email, roll_number FROM users WHERE college_email = ? OR roll_number = ?",
-        (college_email, roll_number),
-    ).fetchone()
+    existing = db.fetchone(
+        db.execute(
+            "SELECT college_email, roll_number FROM users WHERE college_email = %s OR roll_number = %s",
+            (college_email, roll_number),
+        )
+    )
     if existing:
         return jsonify({"error": "An account with this email or roll number already exists."}), 409
 
-    ext = Path(id_card.filename).suffix.lower() or ".jpg"
-    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
-        return jsonify({"error": "ID card must be JPG, PNG, or WEBP."}), 400
-
-    file_hash = hashlib.sha256(f"{college_email}{time.time()}".encode()).hexdigest()[:16]
-    filename = f"{file_hash}{ext}"
-    id_card.save(UPLOAD_DIR / filename)
+    try:
+        filename, file_bytes = save_id_card(id_card, college_email)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     now = time.time()
-    cur = db.execute(
+    user_id = db.insert_returning_id(
         """
-        INSERT INTO users (name, roll_number, phone, college_email, campus, id_card_path, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (name, roll_number, phone, college_email, campus, id_card_path, id_card_data, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (name, roll_number, phone, college_email, campus, filename, now),
+        (name, roll_number, phone, college_email, campus, filename, file_bytes, now),
     )
-    user_id = cur.lastrowid
 
     otp = generate_otp()
+    if db.is_postgres:
+        db.execute(
+            """
+            INSERT INTO otp_codes (college_email, code, expires_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (college_email) DO UPDATE
+            SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at
+            """,
+            (college_email, otp, now + 600),
+        )
+    else:
+        db.execute(
+            """
+            INSERT INTO otp_codes (college_email, code, expires_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(college_email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at
+            """,
+            (college_email, otp, now + 600),
+        )
+
+    try:
+        delivery = deliver_otp(college_email, otp)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    token = secrets.token_urlsafe(32)
     db.execute(
-        """
-        INSERT INTO otp_codes (college_email, code, expires_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(college_email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at
-        """,
-        (college_email, otp, now + 600),
+        "INSERT INTO sessions (token, user_id, created_at) VALUES (%s, %s, %s)",
+        (token, user_id, now),
     )
     db.commit()
 
-    print(f"\n[CampusSwap OTP] {college_email} -> {otp}\n")
-
-    token = secrets.token_urlsafe(32)
-    db.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)", (token, user_id, now))
-    db.commit()
-
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.fetchone(db.execute("SELECT * FROM users WHERE id = %s", (user_id,)))
     payload = {
         "token": token,
         "user": user_to_dict(user),
-        "message": "Account created. Verify your college email with the OTP sent.",
+        "message": "Account created. Check your college email for the verification code.",
     }
-    if DEBUG:
-        payload["demoOtp"] = otp
+    if delivery.get("demoOtp"):
+        payload["demoOtp"] = delivery["demoOtp"]
     return jsonify(payload), 201
 
 
@@ -337,27 +331,43 @@ def send_otp():
         return jsonify({"error": "Invalid college email."}), 400
 
     db = get_db()
-    user = db.execute("SELECT id FROM users WHERE college_email = ?", (college_email,)).fetchone()
+    user = db.fetchone(
+        db.execute("SELECT id FROM users WHERE college_email = %s", (college_email,))
+    )
     if not user:
         return jsonify({"error": "No account found for this email."}), 404
 
     otp = generate_otp()
     now = time.time()
-    db.execute(
-        """
-        INSERT INTO otp_codes (college_email, code, expires_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(college_email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at
-        """,
-        (college_email, otp, now + 600),
-    )
+    if db.is_postgres:
+        db.execute(
+            """
+            INSERT INTO otp_codes (college_email, code, expires_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (college_email) DO UPDATE
+            SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at
+            """,
+            (college_email, otp, now + 600),
+        )
+    else:
+        db.execute(
+            """
+            INSERT INTO otp_codes (college_email, code, expires_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT(college_email) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at
+            """,
+            (college_email, otp, now + 600),
+        )
     db.commit()
 
-    print(f"\n[CampusSwap OTP] {college_email} -> {otp}\n")
+    try:
+        delivery = deliver_otp(college_email, otp)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
 
     payload = {"message": "Verification code sent to your college email."}
-    if DEBUG:
-        payload["demoOtp"] = otp
+    if delivery.get("demoOtp"):
+        payload["demoOtp"] = delivery["demoOtp"]
     return jsonify(payload)
 
 
@@ -368,10 +378,12 @@ def verify_email():
     code = (data.get("code") or "").strip()
 
     db = get_db()
-    otp_row = db.execute(
-        "SELECT code, expires_at FROM otp_codes WHERE college_email = ?",
-        (college_email,),
-    ).fetchone()
+    otp_row = db.fetchone(
+        db.execute(
+            "SELECT code, expires_at FROM otp_codes WHERE college_email = %s",
+            (college_email,),
+        )
+    )
     if not otp_row:
         return jsonify({"error": "No verification code found. Request a new one."}), 404
     if time.time() > otp_row["expires_at"]:
@@ -380,13 +392,15 @@ def verify_email():
         return jsonify({"error": "Invalid verification code."}), 400
 
     db.execute(
-        "UPDATE users SET email_verified = 1, id_verified = 1 WHERE college_email = ?",
+        "UPDATE users SET email_verified = 1, id_verified = 1 WHERE college_email = %s",
         (college_email,),
     )
-    db.execute("DELETE FROM otp_codes WHERE college_email = ?", (college_email,))
+    db.execute("DELETE FROM otp_codes WHERE college_email = %s", (college_email,))
     db.commit()
 
-    user = db.execute("SELECT * FROM users WHERE college_email = ?", (college_email,)).fetchone()
+    user = db.fetchone(
+        db.execute("SELECT * FROM users WHERE college_email = %s", (college_email,))
+    )
     return jsonify({"user": user_to_dict(user), "message": "Email verified successfully!"})
 
 
@@ -400,50 +414,54 @@ def login():
         return jsonify({"error": "College email and roll number are required."}), 400
 
     db = get_db()
-    user = db.execute(
-        "SELECT * FROM users WHERE college_email = ? AND roll_number = ?",
-        (college_email, roll_number),
-    ).fetchone()
+    user = db.fetchone(
+        db.execute(
+            "SELECT * FROM users WHERE college_email = %s AND roll_number = %s",
+            (college_email, roll_number),
+        )
+    )
     if not user:
         return jsonify({"error": "Invalid email or roll number."}), 401
 
     token = secrets.token_urlsafe(32)
     now = time.time()
-    db.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)", (token, user["id"], now))
+    db.execute(
+        "INSERT INTO sessions (token, user_id, created_at) VALUES (%s, %s, %s)",
+        (token, user["id"], now),
+    )
     db.commit()
-
     return jsonify({"token": token, "user": user_to_dict(user)})
 
 
 @app.route("/api/auth/me")
 def me():
     user = get_current_user()
-    if not user:
-        return jsonify({"user": None})
-    return jsonify({"user": user_to_dict(user)})
+    return jsonify({"user": user_to_dict(user) if user else None})
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():
     token = get_token()
     if token:
-        get_db().execute("DELETE FROM sessions WHERE token = ?", (token,))
+        get_db().execute("DELETE FROM sessions WHERE token = %s", (token,))
         get_db().commit()
     return jsonify({"message": "Logged out."})
 
 
 @app.route("/api/listings")
 def list_listings():
-    rows = get_db().execute(
-        """
-        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
-               u.phone AS seller_phone, u.roll_number AS seller_roll
-        FROM listings l
-        JOIN users u ON u.id = l.seller_id
-        WHERE l.status = 'active'
-        ORDER BY l.created_at DESC
-        """
-    ).fetchall()
+    rows = get_db().fetchall(
+        get_db().execute(
+            """
+            SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+                   u.phone AS seller_phone, u.roll_number AS seller_roll
+            FROM listings l
+            JOIN users u ON u.id = l.seller_id
+            WHERE l.status = 'active'
+            ORDER BY l.created_at DESC
+            """
+        )
+    )
     listings = []
     for row in rows:
         seller = {
@@ -458,16 +476,18 @@ def list_listings():
 
 @app.route("/api/listings/<listing_id>")
 def get_listing(listing_id):
-    row = get_db().execute(
-        """
-        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
-               u.phone AS seller_phone, u.roll_number AS seller_roll
-        FROM listings l
-        JOIN users u ON u.id = l.seller_id
-        WHERE l.id = ?
-        """,
-        (listing_id,),
-    ).fetchone()
+    row = get_db().fetchone(
+        get_db().execute(
+            """
+            SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+                   u.phone AS seller_phone, u.roll_number AS seller_roll
+            FROM listings l
+            JOIN users u ON u.id = l.seller_id
+            WHERE l.id = %s
+            """,
+            (listing_id,),
+        )
+    )
     if not row:
         return jsonify({"error": "Listing not found."}), 404
     seller = {
@@ -488,7 +508,7 @@ def create_listing(user):
     get_db().execute(
         """
         INSERT INTO listings (id, seller_id, title, description, price, category, condition, campus, emoji, image, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             listing_id,
@@ -511,17 +531,19 @@ def create_listing(user):
 @app.route("/api/my-listings")
 @require_auth
 def my_listings(user):
-    rows = get_db().execute(
-        """
-        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
-               u.phone AS seller_phone, u.roll_number AS seller_roll
-        FROM listings l
-        JOIN users u ON u.id = l.seller_id
-        WHERE l.seller_id = ?
-        ORDER BY l.created_at DESC
-        """,
-        (user["id"],),
-    ).fetchall()
+    rows = get_db().fetchall(
+        get_db().execute(
+            """
+            SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+                   u.phone AS seller_phone, u.roll_number AS seller_roll
+            FROM listings l
+            JOIN users u ON u.id = l.seller_id
+            WHERE l.seller_id = %s
+            ORDER BY l.created_at DESC
+            """,
+            (user["id"],),
+        )
+    )
     listings = []
     for row in rows:
         seller = {
@@ -537,23 +559,27 @@ def my_listings(user):
 @app.route("/api/listings/<listing_id>/mark-sold", methods=["POST"])
 @require_auth
 def mark_listing_sold(user, listing_id):
-    row = get_db().execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    db = get_db()
+    row = db.fetchone(db.execute("SELECT * FROM listings WHERE id = %s", (listing_id,)))
     if not row:
         return jsonify({"error": "Listing not found."}), 404
     if row["seller_id"] != user["id"]:
         return jsonify({"error": "You can only update your own listings."}), 403
     if row["status"] == "sold":
         return jsonify({"message": "Already marked as sold.", "listing": listing_to_dict(row)})
-    get_db().execute("UPDATE listings SET status = 'sold' WHERE id = ?", (listing_id,))
-    get_db().commit()
-    updated = get_db().execute(
-        """
-        SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
-               u.phone AS seller_phone, u.roll_number AS seller_roll
-        FROM listings l JOIN users u ON u.id = l.seller_id WHERE l.id = ?
-        """,
-        (listing_id,),
-    ).fetchone()
+
+    db.execute("UPDATE listings SET status = 'sold' WHERE id = %s", (listing_id,))
+    db.commit()
+    updated = db.fetchone(
+        db.execute(
+            """
+            SELECT l.*, u.name AS seller_name, u.college_email AS seller_email,
+                   u.phone AS seller_phone, u.roll_number AS seller_roll
+            FROM listings l JOIN users u ON u.id = l.seller_id WHERE l.id = %s
+            """,
+            (listing_id,),
+        )
+    )
     seller = {
         "name": updated["seller_name"],
         "college_email": updated["seller_email"],
@@ -566,34 +592,40 @@ def mark_listing_sold(user, listing_id):
 @app.route("/api/listings/<listing_id>", methods=["DELETE"])
 @require_auth
 def delete_listing(user, listing_id):
-    row = get_db().execute("SELECT seller_id FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    db = get_db()
+    row = db.fetchone(db.execute("SELECT seller_id FROM listings WHERE id = %s", (listing_id,)))
     if not row:
         return jsonify({"error": "Listing not found."}), 404
     if row["seller_id"] != user["id"]:
         return jsonify({"error": "You can only delete your own listings."}), 403
-    get_db().execute("DELETE FROM listings WHERE id = ?", (listing_id,))
-    get_db().commit()
+    db.execute("DELETE FROM listings WHERE id = %s", (listing_id,))
+    db.commit()
     return jsonify({"message": "Listing deleted."})
 
 
 @app.route("/api/conversations", methods=["GET"])
 @require_auth
 def list_conversations(user):
-    rows = get_db().execute(
-        """
-        SELECT c.*, l.title AS listing_title, l.price AS listing_price,
-               buyer.name AS buyer_name, seller.name AS seller_name,
-               (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-               (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
-        FROM conversations c
-        JOIN listings l ON l.id = c.listing_id
-        JOIN users buyer ON buyer.id = c.buyer_id
-        JOIN users seller ON seller.id = c.seller_id
-        WHERE c.buyer_id = ? OR c.seller_id = ?
-        ORDER BY COALESCE(last_message_at, c.created_at) DESC
-        """,
-        (user["id"], user["id"]),
-    ).fetchall()
+    rows = get_db().fetchall(
+        get_db().execute(
+            """
+            SELECT c.*, l.title AS listing_title, l.price AS listing_price,
+                   buyer.name AS buyer_name, seller.name AS seller_name,
+                   (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+                   (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at
+            FROM conversations c
+            JOIN listings l ON l.id = c.listing_id
+            JOIN users buyer ON buyer.id = c.buyer_id
+            JOIN users seller ON seller.id = c.seller_id
+            WHERE c.buyer_id = %s OR c.seller_id = %s
+            ORDER BY COALESCE(
+              (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1),
+              c.created_at
+            ) DESC
+            """,
+            (user["id"], user["id"]),
+        )
+    )
     conversations = []
     for row in rows:
         other_name = row["seller_name"] if row["buyer_id"] == user["id"] else row["buyer_name"]
@@ -616,48 +648,56 @@ def list_conversations(user):
 def start_conversation(user):
     data = request.get_json(silent=True) or {}
     listing_id = data.get("listingId")
-    listing = get_db().execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    db = get_db()
+    listing = db.fetchone(db.execute("SELECT * FROM listings WHERE id = %s", (listing_id,)))
     if not listing:
         return jsonify({"error": "Listing not found."}), 404
     if listing["seller_id"] == user["id"]:
         return jsonify({"error": "You cannot message yourself."}), 400
 
-    existing = get_db().execute(
-        "SELECT id FROM conversations WHERE listing_id = ? AND buyer_id = ?",
-        (listing_id, user["id"]),
-    ).fetchone()
+    existing = db.fetchone(
+        db.execute(
+            "SELECT id FROM conversations WHERE listing_id = %s AND buyer_id = %s",
+            (listing_id, user["id"]),
+        )
+    )
     if existing:
         return jsonify({"conversationId": existing["id"]})
 
     now = time.time()
-    cur = get_db().execute(
+    conv_id = db.insert_returning_id(
         """
         INSERT INTO conversations (listing_id, buyer_id, seller_id, created_at)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
         """,
         (listing_id, user["id"], listing["seller_id"], now),
     )
-    get_db().commit()
-    return jsonify({"conversationId": cur.lastrowid}), 201
+    db.commit()
+    return jsonify({"conversationId": conv_id}), 201
 
 
 @app.route("/api/conversations/<int:conversation_id>/messages")
 @require_auth
 def get_messages(user, conversation_id):
-    conv = get_db().execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    db = get_db()
+    conv = db.fetchone(
+        db.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,))
+    )
     if not conv or user["id"] not in (conv["buyer_id"], conv["seller_id"]):
         return jsonify({"error": "Conversation not found."}), 404
 
-    rows = get_db().execute(
-        """
-        SELECT m.*, u.name AS sender_name
-        FROM messages m
-        JOIN users u ON u.id = m.sender_id
-        WHERE m.conversation_id = ?
-        ORDER BY m.created_at ASC
-        """,
-        (conversation_id,),
-    ).fetchall()
+    rows = db.fetchall(
+        db.execute(
+            """
+            SELECT m.*, u.name AS sender_name
+            FROM messages m
+            JOIN users u ON u.id = m.sender_id
+            WHERE m.conversation_id = %s
+            ORDER BY m.created_at ASC
+            """,
+            (conversation_id,),
+        )
+    )
     messages = [
         {
             "id": row["id"],
@@ -675,7 +715,10 @@ def get_messages(user, conversation_id):
 @app.route("/api/conversations/<int:conversation_id>/messages", methods=["POST"])
 @require_auth
 def send_message(user, conversation_id):
-    conv = get_db().execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    db = get_db()
+    conv = db.fetchone(
+        db.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,))
+    )
     if not conv or user["id"] not in (conv["buyer_id"], conv["seller_id"]):
         return jsonify({"error": "Conversation not found."}), 404
 
@@ -685,18 +728,18 @@ def send_message(user, conversation_id):
         return jsonify({"error": "Message cannot be empty."}), 400
 
     now = time.time()
-    cur = get_db().execute(
+    msg_id = db.insert_returning_id(
         """
         INSERT INTO messages (conversation_id, sender_id, body, created_at)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
         """,
         (conversation_id, user["id"], body, now),
     )
-    get_db().commit()
+    db.commit()
     return jsonify(
         {
             "message": {
-                "id": cur.lastrowid,
+                "id": msg_id,
                 "body": body,
                 "senderId": user["id"],
                 "senderName": user["name"],
@@ -712,7 +755,8 @@ def send_message(user, conversation_id):
 def create_payment(user):
     data = request.get_json(silent=True) or {}
     listing_id = data.get("listingId")
-    listing = get_db().execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    db = get_db()
+    listing = db.fetchone(db.execute("SELECT * FROM listings WHERE id = %s", (listing_id,)))
     if not listing or listing["status"] != "active":
         return jsonify({"error": "Listing unavailable."}), 404
     if listing["seller_id"] == user["id"]:
@@ -720,15 +764,15 @@ def create_payment(user):
 
     txn_id = secrets.token_urlsafe(10)
     now = time.time()
-    get_db().execute(
+    db.execute(
         """
         INSERT INTO transactions (id, listing_id, buyer_id, seller_id, amount, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (txn_id, listing_id, user["id"], listing["seller_id"], listing["price"], now),
     )
-    get_db().execute("UPDATE listings SET status = 'sold' WHERE id = ?", (listing_id,))
-    get_db().commit()
+    db.execute("UPDATE listings SET status = 'sold' WHERE id = %s", (listing_id,))
+    db.commit()
 
     return jsonify(
         {
@@ -746,7 +790,20 @@ def create_payment(user):
 
 @app.route("/uploads/id_cards/<filename>")
 def serve_id_card(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
+    path = UPLOAD_DIR / filename
+    if path.exists():
+        return send_from_directory(UPLOAD_DIR, filename)
+
+    row = get_db().fetchone(
+        get_db().execute(
+            "SELECT id_card_data FROM users WHERE id_card_path = %s",
+            (filename,),
+        )
+    )
+    if row and row.get("id_card_data"):
+        return send_file(BytesIO(row["id_card_data"]), mimetype="image/jpeg")
+
+    return jsonify({"error": "File not found."}), 404
 
 
 @app.route("/", defaults={"path": ""})

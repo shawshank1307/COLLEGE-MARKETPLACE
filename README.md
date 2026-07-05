@@ -1,8 +1,14 @@
 # JKLU Swap — College Marketplace
 
+## Deploy to Production
+
+See **[DEPLOY.md](DEPLOY.md)** for step-by-step instructions to deploy on Render with PostgreSQL and real email OTP.
+
 **Live site:** [https://shawshank1307.github.io/COLLEGE-MARKETPLACE/](https://shawshank1307.github.io/COLLEGE-MARKETPLACE/)
 
-> On the live site, data is stored in your browser (demo mode) so signup, login, ID upload, listings, and messages all work without a server.
+**Production API:** `https://jklu-swap.onrender.com` (after you deploy on Render)
+
+> On GitHub Pages, the app connects to the Render backend when it's online. If the server is asleep, it falls back to browser demo mode.
 
 A student marketplace built for **JK Lakshmipat University (JKLU)**, Jaipur — where students can buy and sell textbooks, electronics, furniture, clothing, and services within the campus community.
 
@@ -109,13 +115,13 @@ Open **http://localhost:5001** in your browser.
 
 ## Deploy the Full App (with working login & listings)
 
-GitHub Pages hosts the static UI. For the **full experience** (signup, listings, messages), deploy the Flask backend to [Render](https://render.com) (free tier):
+See **[DEPLOY.md](DEPLOY.md)** for the complete Render + PostgreSQL + SMTP setup guide.
 
-1. Push this repo to GitHub
-2. Go to [render.com](https://render.com) → **New → Blueprint**
-3. Connect the `shawshank1307/COLLEGE-MARKETPLACE` repo
-4. Render reads `render.yaml` and deploys automatically
-5. Your live full app will be at `https://jklu-swap.onrender.com`
+Quick summary:
+
+1. [render.com](https://render.com) → **New → Blueprint** → connect this repo
+2. Add SMTP environment variables for real email OTP
+3. Visit `https://jklu-swap.onrender.com`
 
 ---
 

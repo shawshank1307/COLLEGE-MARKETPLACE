@@ -1,15 +1,17 @@
 import * as localApi from "./local-api.js";
+import { PRODUCTION_API_URL } from "./config.js";
 
 const API_BASE = (() => {
   const { hostname, port } = window.location;
   if (port === "5001" || port === "5000") return "";
-  if (hostname.endsWith(".github.io") || hostname.endsWith(".github.dev")) return null;
+  if (hostname.endsWith(".github.io") || hostname.endsWith(".github.dev")) {
+    return PRODUCTION_API_URL;
+  }
   if (hostname !== "localhost" && hostname !== "127.0.0.1") return "";
   return "http://localhost:5001";
 })();
 
-const FORCE_LOCAL = API_BASE === null;
-let backendAvailable = FORCE_LOCAL ? false : null;
+let backendAvailable = null;
 
 function getToken() {
   return localStorage.getItem("campusswap_token");
@@ -23,17 +25,16 @@ function setToken(token) {
 function friendlyError(err) {
   const msg = err?.message || "";
   if (msg === "Failed to fetch" || err?.name === "TypeError") {
-    return "Cannot reach the server. Check your connection or try again later.";
+    return "Cannot reach the server. The backend may be starting up — try again in a minute.";
   }
   return msg || "Something went wrong.";
 }
 
 async function checkBackend() {
-  if (FORCE_LOCAL) return false;
   if (backendAvailable !== null) return backendAvailable;
   try {
     const res = await fetch(`${API_BASE}/api/health`, {
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(8000),
     });
     backendAvailable = res.ok;
   } catch {
@@ -43,9 +44,9 @@ async function checkBackend() {
 }
 
 async function request(path, options = {}) {
-  const useLocal = FORCE_LOCAL || !(await checkBackend());
+  const online = await checkBackend();
 
-  if (useLocal) {
+  if (!online) {
     try {
       return await localApi.handle(path, options);
     } catch (err) {
