@@ -17,7 +17,13 @@ DB_PATH = BASE_DIR / "campus_market.db"
 DEBUG = os.environ.get("FLASK_DEBUG", "1") == "1"
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+CORS(app, supports_credentials=True, origins=[
+    "https://shawshank1307.github.io",
+    "http://localhost:5001",
+    "http://127.0.0.1:5001",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+])
 
 COLLEGE_EMAIL_RE = re.compile(
     r"^[a-zA-Z0-9._%+-]+@(?!gmail\.com|yahoo\.com|hotmail\.com|outlook\.com)"

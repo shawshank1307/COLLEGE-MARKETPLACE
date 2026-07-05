@@ -2,6 +2,8 @@
 
 **Live site:** [https://shawshank1307.github.io/COLLEGE-MARKETPLACE/](https://shawshank1307.github.io/COLLEGE-MARKETPLACE/)
 
+> On the live site, data is stored in your browser (demo mode) so signup, login, ID upload, listings, and messages all work without a server.
+
 A student marketplace built for **JK Lakshmipat University (JKLU)**, Jaipur — where students can buy and sell textbooks, electronics, furniture, clothing, and services within the campus community.
 
 ---
