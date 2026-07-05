@@ -6,7 +6,7 @@ import {
   formatPrice,
   timeAgo,
 } from "./data.js";
-import { JKLU, CAMPUS_PHOTOS, LOGO, photoUrl } from "./config.js";
+import { JKLU, CAMPUS_PHOTOS, LOGO, photoUrl, getRoutePhotoIndex, photoAt } from "./config.js";
 import { processListingImage, listingImageHtml } from "./image-utils.js";
 import { initAmbient } from "./ambient.js";
 import { api } from "./api.js";
@@ -38,6 +38,35 @@ let myListingsCache = [];
 let signupDraft = { campus: JKLU.campus };
 let cameraStream = null;
 let slideshowTimer = null;
+let heroSlideshowTimer = null;
+
+function applySectionPhoto(photoIndex) {
+  const photo = photoAt(photoIndex);
+  const url = photoUrl(photo);
+  const bg = document.getElementById("page-bg");
+  if (!bg) return;
+  if (bg.dataset.photoIndex === String(photoIndex)) return;
+
+  const img = new Image();
+  img.onload = () => {
+    bg.style.backgroundImage = `url('${url}')`;
+    bg.dataset.photoIndex = String(photoIndex);
+  };
+  img.src = url;
+}
+
+function renderPageBanner(photoIndex, title, subtitle = "") {
+  const photo = photoAt(photoIndex);
+  return `
+    <section class="page-banner animate-fade" style="background-image:url('${photoUrl(photo)}')">
+      <div class="page-banner-overlay"></div>
+      <div class="container page-banner-content">
+        <h1>${escapeHtml(title)}</h1>
+        ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
+        <p class="page-banner-caption">${escapeHtml(photo.caption)}</p>
+      </div>
+    </section>`;
+}
 
 function showToast(message, duration = 3000) {
   toastEl.textContent = message;
@@ -196,12 +225,16 @@ function stopSlideshow() {
     clearInterval(slideshowTimer);
     slideshowTimer = null;
   }
+  if (heroSlideshowTimer) {
+    clearInterval(heroSlideshowTimer);
+    heroSlideshowTimer = null;
+  }
 }
 
-function initSlideshow() {
+function initSlideshow(containerSelector = ".auth-slide", dotSelector = ".slide-dot") {
   stopSlideshow();
-  const slides = document.querySelectorAll(".auth-slide");
-  const dots = document.querySelectorAll(".slide-dot");
+  const slides = document.querySelectorAll(containerSelector);
+  const dots = document.querySelectorAll(dotSelector);
   if (!slides.length) return;
 
   let current = 0;
@@ -215,13 +248,21 @@ function initSlideshow() {
     dot.addEventListener("click", () => show(i));
   });
 
-  slideshowTimer = setInterval(() => {
-    show((current + 1) % slides.length);
-  }, 4500);
+  if (slides.length > 1) {
+    slideshowTimer = setInterval(() => {
+      show((current + 1) % slides.length);
+    }, 4500);
+  }
 }
 
-function renderAuthShell(formHtml, { subtitle = JKLU.tagline } = {}) {
-  const slides = CAMPUS_PHOTOS.map(
+function renderAuthShell(formHtml, { subtitle = JKLU.tagline, photoIndex = 0 } = {}) {
+  const start = photoIndex % CAMPUS_PHOTOS.length;
+  const ordered = [
+    ...CAMPUS_PHOTOS.slice(start),
+    ...CAMPUS_PHOTOS.slice(0, start),
+  ];
+
+  const slides = ordered.map(
     (photo, i) =>
       `<div class="auth-slide ${i === 0 ? "active" : ""}" style="background-image:url('${photoUrl(photo)}')">
         <div class="auth-slide-overlay"></div>
@@ -231,7 +272,7 @@ function renderAuthShell(formHtml, { subtitle = JKLU.tagline } = {}) {
       </div>`
   ).join("");
 
-  const dots = CAMPUS_PHOTOS.map(
+  const dots = ordered.map(
     (_, i) => `<button type="button" class="slide-dot ${i === 0 ? "active" : ""}" aria-label="Slide ${i + 1}"></button>`
   ).join("");
 
@@ -294,6 +335,9 @@ async function startCamera(videoEl) {
 }
 
 function renderHome() {
+  const photoIndex = getRoutePhotoIndex("/");
+  applySectionPhoto(photoIndex);
+
   const listings = filterListings(listingsCache);
 
   const pills = CATEGORIES.map(
@@ -309,7 +353,7 @@ function renderHome() {
   app.innerHTML = `
     <section class="hero jklu-hero">
       <div class="hero-bg-slides">
-        ${CAMPUS_PHOTOS.slice(0, 3).map((p, i) => `<div class="hero-bg-slide ${i === 0 ? "active" : ""}" style="background-image:url('${photoUrl(p)}')"></div>`).join("")}
+        ${CAMPUS_PHOTOS.map((p, i) => `<div class="hero-bg-slide ${i === photoIndex ? "active" : ""}" style="background-image:url('${photoUrl(p)}')"></div>`).join("")}
       </div>
       <img src="${LOGO.large}" alt="" class="hero-watermark" aria-hidden="true" />
       <div class="hero-overlay"></div>
@@ -343,21 +387,25 @@ function renderHome() {
     <section class="container"><h2 class="section-title animate-in">${listings.length} listing${listings.length !== 1 ? "s" : ""} at JKLU</h2>${grid}</section>`;
 
   bindFilterEvents();
-  initHeroSlideshow();
+  initHeroSlideshow(photoIndex);
   document.getElementById("browse-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     document.querySelector(".filters-section")?.scrollIntoView({ behavior: "smooth" });
   });
 }
 
-function initHeroSlideshow() {
+function initHeroSlideshow(startIndex = 0) {
   const slides = document.querySelectorAll(".hero-bg-slide");
   if (slides.length < 2) return;
-  let i = 0;
-  setInterval(() => {
-    slides[i].classList.remove("active");
-    i = (i + 1) % slides.length;
-    slides[i].classList.add("active");
+  let i = startIndex % slides.length;
+  const show = (index) => {
+    slides.forEach((s, idx) => s.classList.toggle("active", idx === index));
+    applySectionPhoto(index);
+    i = index;
+  };
+  show(i);
+  heroSlideshowTimer = setInterval(() => {
+    show((i + 1) % slides.length);
   }, 6000);
 }
 
@@ -381,6 +429,8 @@ function bindFilterEvents() {
 function renderSignup(step = 1) {
   stopCamera();
   stopSlideshow();
+  const photoIndex = getRoutePhotoIndex("/signup", { signupStep: step });
+  applySectionPhoto(photoIndex);
 
   let content = "";
 
@@ -436,6 +486,7 @@ function renderSignup(step = 1) {
 
   app.innerHTML = renderAuthShell(content, {
     subtitle: step === 1 ? "Create your JKLU student account" : step === 2 ? "Verify your JKLU identity" : "Almost there — verify your email",
+    photoIndex,
   });
   bindAuthShellEvents();
 
@@ -554,6 +605,8 @@ function renderSignup(step = 1) {
 
 function renderLogin() {
   stopSlideshow();
+  const photoIndex = getRoutePhotoIndex("/login");
+  applySectionPhoto(photoIndex);
   const formHtml = `
     <h2>Welcome Back</h2>
     <p class="form-subtitle">Log in with your JKLU email and roll number.</p>
@@ -564,7 +617,7 @@ function renderLogin() {
     </form>
     <p class="auth-footer">New to JKLU Swap? <a href="#/signup">Create an account</a></p>`;
 
-  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Welcome back to JKLU Swap" });
+  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Welcome back to JKLU Swap", photoIndex });
   bindAuthShellEvents();
 
   document.getElementById("login-form")?.addEventListener("submit", async (e) => {
@@ -591,6 +644,8 @@ function renderLogin() {
 
 function renderVerify() {
   stopSlideshow();
+  const photoIndex = getRoutePhotoIndex("/verify");
+  applySectionPhoto(photoIndex);
   const user = getUser();
   if (!user) {
     navigate("#/login");
@@ -609,7 +664,7 @@ function renderVerify() {
     </form>
     <button type="button" class="btn btn-outline btn-block" id="resend-otp" style="margin-top:0.75rem">Resend Code</button>`;
 
-  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Verify your JKLU email to continue" });
+  app.innerHTML = renderAuthShell(formHtml, { subtitle: "Verify your JKLU email to continue", photoIndex });
   bindAuthShellEvents();
 
   document.getElementById("verify-form")?.addEventListener("submit", async (e) => {
@@ -640,6 +695,9 @@ function renderVerify() {
 }
 
 async function renderDetail(id) {
+  const photoIndex = getRoutePhotoIndex(`/item/${id}`);
+  applySectionPhoto(photoIndex);
+
   let listing;
   try {
     const data = await api.getListing(id);
@@ -683,6 +741,7 @@ async function renderDetail(id) {
   }
 
   app.innerHTML = `
+    ${renderPageBanner(photoIndex, listing.title, `${getCategoryLabel(listing.category)} · ${formatPrice(listing.price)}`)}
     <div class="container detail-page">
       <a href="#/" class="back-link">← Back to listings</a>
       <div class="detail-grid">
@@ -772,6 +831,9 @@ async function renderDetail(id) {
 }
 
 function renderSell() {
+  const photoIndex = getRoutePhotoIndex("/sell");
+  applySectionPhoto(photoIndex);
+
   if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/signup"))) {
     app.innerHTML = `<div class="container auth-page"><div class="auth-card"><h2>Sign up required</h2><p class="form-subtitle">Create a verified student account to sell items.</p><a href="#/signup" class="btn btn-accent btn-block">Sign Up</a></div></div>`;
     return;
@@ -783,8 +845,9 @@ function renderSell() {
   const conditionOptions = CONDITIONS.map((c) => `<option value="${c}">${c}</option>`).join("");
 
   app.innerHTML = `
+    ${renderPageBanner(photoIndex, "List an Item", `Selling at ${JKLU.campus}`)}
     <div class="container animate-fade">
-      <div class="page-header"><h1>List an Item</h1><p>Selling at <strong>${escapeHtml(JKLU.campus)}</strong> as ${escapeHtml(user.name)} (${escapeHtml(user.rollNumber)})</p></div>
+      <p class="sell-user-line">Listing as <strong>${escapeHtml(user.name)}</strong> (${escapeHtml(user.rollNumber)})</p>
       <form class="form-card animate-slide-up" id="sell-form">
         <div class="form-group"><label for="title">Title</label><input class="input" id="title" required maxlength="100" placeholder="e.g. Engineering Mathematics — Grewal" /></div>
         <div class="form-row">
@@ -854,6 +917,9 @@ function renderSell() {
 }
 
 function renderProfile() {
+  const photoIndex = getRoutePhotoIndex("/profile");
+  applySectionPhoto(photoIndex);
+
   if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) {
     renderLogin();
     return;
@@ -876,8 +942,8 @@ function renderProfile() {
     : "";
 
   app.innerHTML = `
+    ${renderPageBanner(photoIndex, "Your Profile", "Verified JKLU student account")}
     <div class="container">
-      <div class="page-header"><h1>Your Profile</h1><p>Verified campus student account</p></div>
       <div class="profile-grid">
         <aside class="profile-sidebar">
           <div class="profile-logo-wrap logo-on-white">
@@ -957,6 +1023,10 @@ function bindListingActions() {
 }
 
 async function renderMessages(conversationId) {
+  const msgPath = conversationId ? `/messages/${conversationId}` : "/messages";
+  const photoIndex = getRoutePhotoIndex(msgPath);
+  applySectionPhoto(photoIndex);
+
   if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) return;
 
   let conversations = [];
@@ -995,8 +1065,8 @@ async function renderMessages(conversationId) {
     : `<p class="chat-empty">No conversations yet. Message a seller from a listing page.</p>`;
 
   app.innerHTML = `
+    ${renderPageBanner(photoIndex, "Messages", "Chat with buyers and sellers on campus")}
     <div class="container messages-page">
-      <div class="page-header"><h1>Messages</h1><p>Chat with buyers and sellers on campus</p></div>
       <div class="messages-layout">
         <aside class="conv-list">${convList}</aside>
         <section class="chat-panel">
@@ -1028,6 +1098,9 @@ async function renderMessages(conversationId) {
 }
 
 async function renderCheckout(listingId) {
+  const photoIndex = getRoutePhotoIndex(`/checkout/${listingId}`);
+  applySectionPhoto(photoIndex);
+
   if (!requireAuth((reason) => navigate(reason === "verify" ? "#/verify" : "#/login"))) return;
 
   let listing;
@@ -1042,8 +1115,8 @@ async function renderCheckout(listingId) {
   }
 
   app.innerHTML = `
+    ${renderPageBanner(photoIndex, "Checkout", `Secure campus payment · ${listing.title}`)}
     <div class="container checkout-page">
-      <div class="page-header"><h1>Checkout</h1><p>Secure campus payment</p></div>
       <div class="checkout-grid">
         <div class="checkout-summary form-card">
           <h3>Order Summary</h3>

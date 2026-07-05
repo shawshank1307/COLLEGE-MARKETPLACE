@@ -42,12 +42,24 @@ body {
 .page-bg {
   position: fixed;
   inset: 0;
-  background:
-    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(11, 61, 122, 0.06), transparent),
-    radial-gradient(ellipse 60% 50% at 90% 100%, rgba(194, 86, 62, 0.06), transparent),
-    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(255, 182, 193, 0.04), transparent);
+  background-color: var(--bg);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: background-image 0.9s ease-in-out;
   pointer-events: none;
-  z-index: -1;
+  z-index: -2;
+}
+
+.page-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(240, 244, 250, 0.82) 0%, rgba(240, 244, 250, 0.94) 55%, rgba(240, 244, 250, 0.97) 100%),
+    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(11, 61, 122, 0.08), transparent),
+    radial-gradient(ellipse 60% 50% at 90% 100%, rgba(194, 86, 62, 0.08), transparent);
+  pointer-events: none;
 }
 
 .container {
@@ -305,6 +317,61 @@ main { flex: 1; padding-bottom: 3rem; }
 .hero-bg-slide.active {
   opacity: 1;
   transform: scale(1);
+}
+
+/* Section banner — unique campus photo per page */
+.page-banner {
+  position: relative;
+  margin: 0 calc(-1 * ((100vw - min(1120px, 92vw)) / 2)) 2rem;
+  width: 100vw;
+  max-width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  min-height: 200px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 0 0 var(--radius) var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.page-banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, rgba(11, 61, 122, 0.82) 0%, rgba(11, 61, 122, 0.45) 45%, rgba(194, 86, 62, 0.35) 100%);
+}
+
+.page-banner-content {
+  position: relative;
+  z-index: 1;
+  padding: 2.5rem 0 2rem;
+  color: #fff;
+}
+
+.page-banner-content h1 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 4vw, 2.35rem);
+  font-weight: 700;
+}
+
+.page-banner-content p {
+  margin: 0;
+  opacity: 0.92;
+  font-size: 1rem;
+}
+
+.page-banner-caption {
+  margin-top: 0.75rem !important;
+  font-size: 0.85rem !important;
+  opacity: 0.75 !important;
+  font-style: italic;
+}
+
+.sell-user-line {
+  margin: 0 0 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
 }
 
 .hero-overlay {
