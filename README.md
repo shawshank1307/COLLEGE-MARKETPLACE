@@ -135,3 +135,7 @@ GitHub Pages hosts the static UI. For the **full experience** (signup, listings,
 ## Author
 
 Built by **Shawshank** ([@shawshank1307](https://github.com/shawshank1307)) for JK Lakshmipat University students.
+
+## License
+
+This project is open source under the [MIT License](LICENSE).
