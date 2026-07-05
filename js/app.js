@@ -110,7 +110,7 @@ async function fetchListings() {
     listingsCache = data.listings || [];
   } catch {
     listingsCache = [];
-    showToast("Could not load listings. Is the server running?");
+    showToast("Could not load listings. Please refresh the page.");
   }
   return listingsCache;
 }
